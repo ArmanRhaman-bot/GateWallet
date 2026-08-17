@@ -8,13 +8,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
 
+// Root folder থেকে index.html serve করবে
 app.get("/", (req, res) => {
   res.sendFile(
-    path.join(__dirname, "public", "index.html")
+    path.join(__dirname, "index.html")
   );
 });
+
+// Static files root folder থেকে
+app.use(
+  express.static(__dirname)
+);
 
 app.get("/health", (req, res) => {
   res.json({
@@ -25,7 +30,7 @@ app.get("/health", (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(
     `iCoinGate Wallet running on port ${PORT}`
   );
