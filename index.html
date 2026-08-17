@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-
 <html lang="en">
 
 <head>
@@ -119,6 +118,7 @@ button{
   word-break:break-all;
   font-size:12px;
   margin-top:8px;
+  line-height:1.5;
 }
 
 .coin{
@@ -138,18 +138,32 @@ button{
   text-align:center;
   color:#8d99a8;
   margin-top:10px;
+  line-height:1.5;
+}
+
+.loading{
+  color:#e7c96a;
+}
+
+.success{
+  color:#55d88a;
+}
+
+.error{
+  color:#ff7777;
 }
 
 </style>
 
 </head>
 
-
 <body>
-
 
 <div class="container">
 
+<!-- =====================================================
+     CREATE
+===================================================== -->
 
 <div class="card">
 
@@ -158,16 +172,16 @@ button{
 </div>
 
 <div class="subtitle">
-Create a non-custodial wallet with a 12-word recovery phrase.
+Create a non-custodial multi-chain wallet with a 12-word recovery phrase.
 </div>
 
 <div class="warning">
 
 ⚠️ <b>IMPORTANT</b><br><br>
 
-Your recovery phrase controls your wallet.
+Your recovery phrase controls your wallet.<br><br>
 
-Never send it to anyone.
+Never send it to anyone.<br><br>
 
 iCoinGate will never ask for your recovery phrase.
 
@@ -184,7 +198,9 @@ iCoinGate will never ask for your recovery phrase.
 </div>
 
 
-<!-- SEED -->
+<!-- =====================================================
+     SEED
+===================================================== -->
 
 <div
   id="seedCard"
@@ -208,7 +224,11 @@ Write these 12 words down and keep them offline.
 
 <div class="warning">
 
-⚠️ Do NOT screenshot or share this phrase.
+⚠️ <b>Do NOT screenshot or share this phrase.</b>
+
+<br><br>
+
+Anyone who gets these words can potentially control your assets.
 
 </div>
 
@@ -222,7 +242,9 @@ Write these 12 words down and keep them offline.
 </div>
 
 
-<!-- WALLET -->
+<!-- =====================================================
+     WALLET
+===================================================== -->
 
 <div
   id="walletCard"
@@ -240,10 +262,16 @@ Your public wallet addresses:
 </div>
 
 
+<!-- BTC -->
+
 <div class="coin">
 
 <div class="coin-name">
 ₿ Bitcoin
+</div>
+
+<div class="small">
+BIP84 Native SegWit
 </div>
 
 <div
@@ -255,6 +283,8 @@ Loading...
 
 </div>
 
+
+<!-- ETH -->
 
 <div class="coin">
 
@@ -272,6 +302,8 @@ Loading...
 </div>
 
 
+<!-- BNB -->
+
 <div class="coin">
 
 <div class="coin-name">
@@ -288,10 +320,38 @@ Loading...
 </div>
 
 
+<!-- SOL -->
+
+<div class="coin">
+
+<div class="coin-name">
+🟣 Solana
+</div>
+
+<div class="small">
+BIP44 / Ed25519
+</div>
+
+<div
+  id="sol"
+  class="address"
+>
+Loading...
+</div>
+
+</div>
+
+
+<!-- TRON -->
+
 <div class="coin">
 
 <div class="coin-name">
 🔴 TRON
+</div>
+
+<div class="small">
+BIP44
 </div>
 
 <div
@@ -304,10 +364,16 @@ Loading...
 </div>
 
 
+<!-- TON -->
+
 <div class="coin">
 
 <div class="coin-name">
-💎 TON
+💎 TON / GRAM
+</div>
+
+<div class="small">
+Same TON account address
 </div>
 
 <div
@@ -339,7 +405,6 @@ Loading...
 
 <div id="status"></div>
 
-
 </div>
 
 
@@ -347,14 +412,19 @@ Loading...
 
 
 /* =====================================================
-   IMPORT LIBRARIES
+   IMPORTS
 ===================================================== */
 
 import {
   HDNodeWallet,
   Mnemonic,
-  Wallet
-} from
+  SigningKey,
+  keccak256,
+  sha256,
+  getBytes,
+  hexlify
+}
+from
 "https://cdn.jsdelivr.net/npm/ethers@6.17.0/+esm";
 
 
@@ -366,7 +436,6 @@ const tg =
   window.Telegram.WebApp;
 
 tg.ready();
-
 tg.expand();
 
 
@@ -380,29 +449,439 @@ let mnemonicPhrase = null;
 
 
 /* =====================================================
-   LOAD BITCOIN LIBRARY
+   RANDOM BIP39
 ===================================================== */
 
-let bitcoin = null;
+async function generateMnemonic(){
 
-let ecc = null;
-
-try{
-
-  const bitcoinModule =
-    await import(
-      "https://cdn.jsdelivr.net/npm/bitcoinjs-lib@7.0.1/+esm"
+  const entropy =
+    crypto.getRandomValues(
+      new Uint8Array(16)
     );
 
-  bitcoin =
-    bitcoinModule;
+  const mnemonic =
+    Mnemonic.fromEntropy(entropy);
 
-}catch(e){
+  return mnemonic.phrase;
 
-  console.error(
-    "Bitcoin library error:",
-    e
+}
+
+
+/* =====================================================
+   BASE58 ENCODER
+===================================================== */
+
+function base58Encode(bytes){
+
+  const alphabet =
+    "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+  let digits = [0];
+
+  for(
+    let i = 0;
+    i < bytes.length;
+    i++
+  ){
+
+    let carry =
+      bytes[i];
+
+    for(
+      let j = 0;
+      j < digits.length;
+      j++
+    ){
+
+      const value =
+        digits[j] * 256 + carry;
+
+      digits[j] =
+        value % 58;
+
+      carry =
+        Math.floor(value / 58);
+
+    }
+
+    while(carry){
+
+      digits.push(
+        carry % 58
+      );
+
+      carry =
+        Math.floor(carry / 58);
+
+    }
+
+  }
+
+  let result = "";
+
+  for(
+    let i = 0;
+    i < bytes.length &&
+    bytes[i] === 0;
+    i++
+  ){
+
+    result += "1";
+
+  }
+
+  for(
+    let i = digits.length - 1;
+    i >= 0;
+    i--
+  ){
+
+    result +=
+      alphabet[digits[i]];
+
+  }
+
+  return result;
+
+}
+
+
+/* =====================================================
+   TRON ADDRESS
+===================================================== */
+
+function tronAddressFromPrivateKey(
+  privateKey
+){
+
+  /*
+    TRON uses secp256k1.
+
+    Derivation:
+    m/44'/195'/0'/0/0
+
+    Address:
+    0x41 + last 20 bytes of
+    Keccak256(uncompressed public key)
+
+    Then Base58Check.
+  */
+
+
+  const publicKey =
+    SigningKey.computePublicKey(
+      privateKey,
+      false
+    );
+
+
+  const publicBytes =
+    getBytes(publicKey);
+
+
+  /*
+    Remove 0x04 prefix
+  */
+
+  const rawPublicKey =
+    publicBytes.slice(1);
+
+
+  const hash =
+    getBytes(
+      keccak256(rawPublicKey)
+    );
+
+
+  const address20 =
+    hash.slice(
+      hash.length - 20
+    );
+
+
+  /*
+    TRON mainnet prefix = 0x41
+  */
+
+  const payload =
+    new Uint8Array(21);
+
+  payload[0] =
+    0x41;
+
+  payload.set(
+    address20,
+    1
   );
+
+
+  /*
+    Base58Check checksum
+  */
+
+  const hash1 =
+    getBytes(
+      sha256(payload)
+    );
+
+  const hash2 =
+    getBytes(
+      sha256(hash1)
+    );
+
+
+  const finalBytes =
+    new Uint8Array(
+      payload.length + 4
+    );
+
+  finalBytes.set(
+    payload,
+    0
+  );
+
+  finalBytes.set(
+    hash2.slice(0,4),
+    payload.length
+  );
+
+
+  return base58Encode(
+    finalBytes
+  );
+
+}
+
+
+/* =====================================================
+   BITCOIN
+===================================================== */
+
+async function deriveBitcoin(
+  mnemonic
+){
+
+  /*
+    bitcoinjs-lib
+    BIP32
+    tiny-secp256k1
+  */
+
+  const bitcoin =
+    await import(
+      "https://esm.sh/bitcoinjs-lib@7.0.0"
+    );
+
+  const ecc =
+    await import(
+      "https://esm.sh/tiny-secp256k1@2.2.3"
+    );
+
+  const bip32Module =
+    await import(
+      "https://esm.sh/bip32@5.0.0"
+    );
+
+  const bip32 =
+    bip32Module.default ||
+    bip32Module.BIP32Factory(
+      ecc
+    );
+
+
+  /*
+    BIP39 seed
+  */
+
+  const mnemonicObj =
+    Mnemonic.fromPhrase(
+      mnemonic
+    );
+
+
+  const seed =
+    getBytes(
+      mnemonicObj.computeSeed()
+    );
+
+
+  /*
+    Mainnet
+  */
+
+  const network =
+    bitcoin.networks.bitcoin;
+
+
+  const root =
+    bip32.fromSeed(
+      seed,
+      network
+    );
+
+
+  /*
+    BIP84 Native SegWit
+
+    m/84'/0'/0'/0/0
+  */
+
+  const child =
+    root.derivePath(
+      "m/84'/0'/0'/0/0"
+    );
+
+
+  const payment =
+    bitcoin.payments.p2wpkh({
+
+      pubkey:
+        child.publicKey,
+
+      network:
+        network
+
+    });
+
+
+  if(!payment.address){
+
+    throw new Error(
+      "Bitcoin address generation failed"
+    );
+
+  }
+
+
+  return payment.address;
+
+}
+
+
+/* =====================================================
+   SOLANA
+===================================================== */
+
+async function deriveSolana(
+  mnemonic
+){
+
+  /*
+    Solana standard path:
+
+    m/44'/501'/0'/0'
+  */
+
+  const bip39 =
+    await import(
+      "https://esm.sh/@scure/bip39@1.6.0"
+    );
+
+
+  const ed25519 =
+    await import(
+      "https://esm.sh/ed25519-hd-key@2.0.0"
+    );
+
+
+  const solana =
+    await import(
+      "https://esm.sh/@solana/web3.js@1.98.4"
+    );
+
+
+  const seed =
+    bip39.mnemonicToSeedSync(
+      mnemonic
+    );
+
+
+  const derived =
+    ed25519.derivePath(
+      "m/44'/501'/0'/0'",
+      Array.from(seed)
+        .map(
+          b =>
+            b.toString(16)
+              .padStart(2,"0")
+        )
+        .join("")
+    );
+
+
+  const keypair =
+    solana.Keypair.fromSeed(
+      derived.key
+    );
+
+
+  return keypair.publicKey.toBase58();
+
+}
+
+
+/* =====================================================
+   TON / GRAM
+===================================================== */
+
+async function deriveTON(
+  mnemonic
+){
+
+  /*
+    WalletKit supports a
+    BIP-39 mnemonic type.
+
+    This lets the same BIP39 phrase
+    be used for the TON derivation.
+  */
+
+  const walletKit =
+    await import(
+      "https://esm.sh/@ton/walletkit"
+    );
+
+
+  const ton =
+    await import(
+      "https://esm.sh/@ton/ton"
+    );
+
+
+  const keyPair =
+    await walletKit.MnemonicToKeyPair(
+      mnemonic.split(" "),
+      "bip-39"
+    );
+
+
+  /*
+    TON V4R2 wallet
+
+    Default mainnet wallet ID.
+  */
+
+  const wallet =
+    ton.WalletContractV4.create({
+
+      workchain: 0,
+
+      publicKey:
+        keyPair.publicKey,
+
+      walletId:
+        0x29a9a317
+
+    });
+
+
+  return wallet.address.toString({
+
+    bounceable:false,
+
+    urlSafe:true
+
+  });
 
 }
 
@@ -411,12 +890,14 @@ try{
    CREATE WALLET
 ===================================================== */
 
-window.createWallet = async function(){
+window.createWallet =
+async function(){
 
   const btn =
     document.getElementById(
       "createBtn"
     );
+
 
   btn.disabled = true;
 
@@ -424,63 +905,69 @@ window.createWallet = async function(){
     "⏳ Generating wallet...";
 
 
+  showStatus(
+    "🔐 Generating secure wallet...",
+    "loading"
+  );
+
+
   try{
 
     /* ================================================
-       BIP-39 12 WORD MNEMONIC
+       BIP39
     ================================================ */
 
-    const mnemonic =
-      Mnemonic.fromEntropy(
-        crypto.getRandomValues(
-          new Uint8Array(16)
-        )
-      );
-
     mnemonicPhrase =
-      mnemonic.phrase;
+      await generateMnemonic();
 
 
     /* ================================================
        ETHEREUM
-       BIP44:
-       m/44'/60'/0'/0/0
     ================================================ */
 
     const ethWallet =
       HDNodeWallet.fromPhrase(
+
         mnemonicPhrase,
+
         "",
+
         "m/44'/60'/0'/0/0"
+
       );
 
 
     /* ================================================
        BNB
 
-       BNB Smart Chain uses the same
-       EVM address derivation.
+       Same EVM derivation
     ================================================ */
 
     const bnbWallet =
       HDNodeWallet.fromPhrase(
+
         mnemonicPhrase,
+
         "",
+
         "m/44'/60'/0'/0/0"
+
       );
 
 
     /* ================================================
-       SHOW SEED
+       SHOW WORDS
     ================================================ */
 
     const words =
       mnemonicPhrase.split(" ");
 
+
     const wordsBox =
       document.getElementById(
         "words"
       );
+
 
     wordsBox.innerHTML = "";
 
@@ -493,11 +980,14 @@ window.createWallet = async function(){
             "div"
           );
 
+
         div.className =
           "word";
 
+
         div.innerText =
           `${index + 1}. ${word}`;
+
 
         wordsBox.appendChild(
           div
@@ -508,10 +998,10 @@ window.createWallet = async function(){
 
 
     /* ================================================
-       STORE TEMP DATA
+       TEMP DATA
 
-       IMPORTANT:
-       Never send mnemonic to server.
+       Mnemonic stays ONLY
+       inside browser memory.
     ================================================ */
 
     walletData = {
@@ -541,17 +1031,29 @@ window.createWallet = async function(){
     );
 
 
+    showStatus(
+      "✅ Recovery phrase generated.",
+      "success"
+    );
+
+
   }catch(e){
 
-    console.error(e);
+    console.error(
+      e
+    );
+
 
     btn.disabled = false;
 
     btn.innerText =
       "🆕 Create New Wallet";
 
+
     showStatus(
-      "❌ Wallet generation failed."
+      "❌ Wallet generation failed: " +
+      (e.message || "Unknown error"),
+      "error"
     );
 
   }
@@ -563,12 +1065,14 @@ window.createWallet = async function(){
    CONFIRM BACKUP
 ===================================================== */
 
-window.confirmBackup = async function(){
+window.confirmBackup =
+async function(){
 
   if(!walletData){
 
     showStatus(
-      "❌ Wallet not generated."
+      "❌ Wallet not generated.",
+      "error"
     );
 
     return;
@@ -596,7 +1100,7 @@ window.confirmBackup = async function(){
     .getElementById(
       "eth"
     )
-    .innerText =
+    ).innerText =
       walletData.ethereum;
 
 
@@ -609,58 +1113,130 @@ window.confirmBackup = async function(){
 
 
   /* ================================================
-     GENERATE TRON
+     BTC
   ================================================ */
 
   try{
 
-    const tronModule =
-      await import(
-        "https://cdn.jsdelivr.net/npm/tronweb@6.4.0/+esm"
+    showStatus(
+      "₿ Deriving Bitcoin...",
+      "loading"
+    );
+
+
+    walletData.bitcoin =
+      await deriveBitcoin(
+        walletData.mnemonic
       );
 
-    const TronWeb =
-      tronModule.TronWeb ||
-      tronModule.default;
+
+    document
+      .getElementById(
+        "btc"
+      )
+      .innerText =
+        walletData.bitcoin;
 
 
-    const tron =
-      new TronWeb({
-        fullHost:
-          "https://api.trongrid.io"
-      });
+  }catch(e){
+
+    console.error(
+      "BTC:",
+      e
+    );
+
+
+    document
+      .getElementById(
+        "btc"
+      )
+      .innerText =
+        "Unable to derive BTC";
+
+  }
+
+
+  /* ================================================
+     SOLANA
+  ================================================ */
+
+  try{
+
+    showStatus(
+      "🟣 Deriving Solana...",
+      "loading"
+    );
+
+
+    walletData.solana =
+      await deriveSolana(
+        walletData.mnemonic
+      );
+
+
+    document
+      .getElementById(
+        "sol"
+      )
+      .innerText =
+        walletData.solana;
+
+
+  }catch(e){
+
+    console.error(
+      "SOL:",
+      e
+    );
+
+
+    document
+      .getElementById(
+        "sol"
+      )
+      .innerText =
+        "Unable to derive SOL";
+
+  }
+
+
+  /* ================================================
+     TRON
+  ================================================ */
+
+  try{
+
+    showStatus(
+      "🔴 Deriving TRON...",
+      "loading"
+    );
 
 
     const tronWallet =
-      tron.fromMnemonic
-        ? await tron.fromMnemonic(
-            walletData.mnemonic
-          )
-        : null;
+      HDNodeWallet.fromPhrase(
+
+        walletData.mnemonic,
+
+        "",
+
+        "m/44'/195'/0'/0/0"
+
+      );
 
 
-    if(tronWallet){
+    walletData.tron =
+      tronAddressFromPrivateKey(
+        tronWallet.privateKey
+      );
 
-      document
-        .getElementById(
-          "trx"
-        )
-        .innerText =
-          tronWallet.address.base58;
 
-      walletData.tron =
-        tronWallet.address.base58;
+    document
+      .getElementById(
+        "trx"
+      )
+      .innerText =
+        walletData.tron;
 
-    }else{
-
-      document
-        .getElementById(
-          "trx"
-        )
-        .innerText =
-          "TRON derivation unavailable";
-
-    }
 
   }catch(e){
 
@@ -669,63 +1245,33 @@ window.confirmBackup = async function(){
       e
     );
 
+
     document
       .getElementById(
         "trx"
       )
       .innerText =
-        "Unable to derive";
+        "Unable to derive TRON";
 
   }
 
 
   /* ================================================
-     TON
+     TON / GRAM
   ================================================ */
 
   try{
 
-    const tonCrypto =
-      await import(
-        "https://cdn.jsdelivr.net/npm/@ton/crypto@3.3.0/+esm"
+    showStatus(
+      "💎 Deriving TON / GRAM...",
+      "loading"
+    );
+
+
+    walletData.ton =
+      await deriveTON(
+        walletData.mnemonic
       );
-
-    const tonModule =
-      await import(
-        "https://cdn.jsdelivr.net/npm/@ton/ton@16.3.0/+esm"
-      );
-
-
-    const mnemonicWords =
-      walletData.mnemonic
-        .split(" ");
-
-
-    const keyPair =
-      await tonCrypto.mnemonicToPrivateKey(
-        mnemonicWords
-      );
-
-
-    const tonWallet =
-      tonModule.WalletContractV4.create({
-
-        workchain:0,
-
-        publicKey:
-          keyPair.publicKey
-
-      });
-
-
-    const tonAddress =
-      tonWallet.address.toString({
-
-        bounceable:false,
-
-        urlSafe:true
-
-      });
 
 
     document
@@ -733,11 +1279,18 @@ window.confirmBackup = async function(){
         "ton"
       )
       .innerText =
-        tonAddress;
+        walletData.ton;
 
 
-    walletData.ton =
-      tonAddress;
+    /*
+      GRAM uses the same TON account
+      address.
+
+      So no separate address is needed.
+    */
+
+    walletData.gram =
+      walletData.ton;
 
 
   }catch(e){
@@ -747,78 +1300,27 @@ window.confirmBackup = async function(){
       e
     );
 
+
     document
       .getElementById(
         "ton"
       )
       .innerText =
-        "Unable to derive";
-
-  }
-
-
-  /* ================================================
-     BITCOIN
-  ================================================ */
-
-  try{
-
-    if(!bitcoin){
-
-      throw new Error(
-        "Bitcoin library unavailable"
-      );
-
-    }
-
-
-    /*
-
-      NOTE:
-
-      Bitcoin native SegWit derivation requires
-      BIP32 + ECC support.
-
-      This section is deliberately kept separate
-      so it can be replaced with the verified
-      bitcoinjs ECC bundle before mainnet use.
-
-    */
-
-
-    document
-      .getElementById(
-        "btc"
-      )
-      .innerText =
-        "BTC derivation module pending";
-
-  }catch(e){
-
-    console.error(
-      "BTC:",
-      e
-    );
-
-    document
-      .getElementById(
-        "btc"
-      )
-      .innerText =
-        "Unable to derive";
+        "Unable to derive TON";
 
   }
 
 
   showStatus(
-    "✅ Wallet generated successfully."
+    "🔥 BTC • ETH • BNB • SOL • TRON • TON wallet ready.",
+    "success"
   );
 
 };
 
 
 /* =====================================================
-   SEND PUBLIC DATA TO TELEGRAM BOT
+   SEND PUBLIC DATA ONLY
 ===================================================== */
 
 window.sendWalletToBot =
@@ -827,7 +1329,8 @@ function(){
   if(!walletData){
 
     showStatus(
-      "❌ Wallet not found."
+      "❌ Wallet not found.",
+      "error"
     );
 
     return;
@@ -836,15 +1339,11 @@ function(){
 
 
   /*
-
     NEVER send:
 
-    walletData.mnemonic
+    mnemonic
     private key
     seed
-
-    Only public addresses.
-
   */
 
 
@@ -853,11 +1352,17 @@ function(){
     action:
       "wallet_created",
 
+    bitcoin:
+      walletData.bitcoin || "",
+
     ethereum:
-      walletData.ethereum,
+      walletData.ethereum || "",
 
     bnb:
-      walletData.bnb,
+      walletData.bnb || "",
+
+    solana:
+      walletData.solana || "",
 
     tron:
       walletData.tron || "",
@@ -865,8 +1370,8 @@ function(){
     ton:
       walletData.ton || "",
 
-    bitcoin:
-      walletData.bitcoin || ""
+    gram:
+      walletData.gram || ""
 
   };
 
@@ -879,16 +1384,23 @@ function(){
       )
     );
 
+
     showStatus(
-      "✅ Wallet information sent to iCoinGate."
+      "✅ Public wallet addresses sent to iCoinGate.",
+      "success"
     );
+
 
   }catch(e){
 
-    console.error(e);
+    console.error(
+      e
+    );
+
 
     showStatus(
-      "❌ Unable to save wallet."
+      "❌ Unable to save wallet.",
+      "error"
     );
 
   }
@@ -912,36 +1424,43 @@ async function(){
 
   const text =
 
-`Ethereum:
-${walletData.ethereum}
+`Bitcoin:
+${walletData.bitcoin || ""}
+
+Ethereum:
+${walletData.ethereum || ""}
 
 BNB:
-${walletData.bnb}
+${walletData.bnb || ""}
+
+Solana:
+${walletData.solana || ""}
 
 TRON:
 ${walletData.tron || ""}
 
-TON:
-${walletData.ton || ""}
-
-Bitcoin:
-${walletData.bitcoin || ""}`;
+TON / GRAM:
+${walletData.ton || ""}`;
 
 
   try{
 
-    await navigator.clipboard.writeText(
-      text
-    );
+    await navigator
+      .clipboard
+      .writeText(text);
+
 
     showStatus(
-      "📋 Addresses copied."
+      "📋 Public addresses copied.",
+      "success"
     );
+
 
   }catch(e){
 
     showStatus(
-      "❌ Copy failed."
+      "❌ Copy failed.",
+      "error"
     );
 
   }
@@ -953,19 +1472,27 @@ ${walletData.bitcoin || ""}`;
    STATUS
 ===================================================== */
 
-function showStatus(text){
+function showStatus(
+  text,
+  type=""
+){
 
-  document
-    .getElementById(
+  const el =
+    document.getElementById(
       "status"
-    )
-    .innerText =
-      text;
+    );
+
+
+  el.innerText =
+    text;
+
+
+  el.className =
+    type;
 
 }
 
 </script>
-
 
 </body>
 
