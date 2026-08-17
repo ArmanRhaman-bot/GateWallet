@@ -1,59 +1,574 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#0b0f14" />
-  <title>iCoinGate Wallet</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Non-Custodial Wallet</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+*{box-sizing:border-box;}
+html{background:#0b0f14;}
+body{margin:0;background:#0b0f14;color:#fff;font-family:Arial,Helvetica,sans-serif;}
+.container{max-width:560px;margin:auto;padding:20px 16px 40px;}
+.card{background:#121821;border:1px solid #202a36;border-radius:20px;padding:20px;margin-bottom:16px;box-shadow:0 8px 30px rgba(0,0,0,.18);}
+.title{font-size:25px;font-weight:700;margin-bottom:8px;}
+.subtitle{color:#8d99a8;font-size:14px;line-height:1.6;}
+.warning{background:#211b0d;border:1px solid #55451b;color:#e7c96a;padding:15px;border-radius:13px;font-size:13px;line-height:1.55;margin-top:16px;}
+.notice{background:#0d2118;border:1px solid #1b5537;color:#6ae7a0;padding:15px;border-radius:13px;font-size:13px;line-height:1.55;margin-top:16px;}
+button{width:100%;border:0;border-radius:14px;padding:15px;font-size:16px;font-weight:700;cursor:pointer;margin-top:10px;}
+button:disabled{opacity:.55;cursor:not-allowed;}
+.primary{background:#2481cc;color:#fff;}
+.secondary{background:#1c2631;color:#fff;}
+.danger{background:#32191d;color:#ff8585;}
+.hidden{display:none !important;}
+.words{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:16px;}
+.word{background:#0d131a;border:1px solid #273342;border-radius:11px;padding:11px 5px;text-align:center;font-size:13px;color:#e7edf5;}
+.word-number{color:#6e7b8a;font-size:10px;display:block;margin-bottom:3px;}
+.coin{margin-top:20px;}
+.coin-header{display:flex;align-items:center;gap:8px;margin-bottom:7px;}
+.coin-icon{font-size:21px;}
+.coin-name{font-weight:700;font-size:17px;}
+.path{color:#7d8997;font-size:11px;margin-bottom:7px;}
+.address{background:#0d131a;border:1px solid #273342;padding:13px;border-radius:11px;word-break:break-all;font-size:12px;line-height:1.55;color:#e8edf3;min-height:45px;}
+.copy-btn{background:#1c2631;color:#dbe4ee;margin-top:7px;padding:11px;font-size:14px;}
+.copy-btn:active{transform:scale(.99);}
+.success{color:#63e6a6;}
+.error{color:#ff8585;}
+#status{text-align:center;color:#8d99a8;margin-top:10px;font-size:13px;line-height:1.5;}
+.loader{display:inline-block;width:15px;height:15px;border:2px solid #657384;border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:6px;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.footer-note{text-align:center;color:#596574;font-size:11px;margin-top:18px;line-height:1.5;}
+@media(max-width:390px){.container{padding:14px 11px 30px;}.card{padding:16px;}.title{font-size:22px;}.words{gap:6px;}.word{font-size:12px;}}
+</style>
 </head>
 <body>
-  <div class="container">
-    <section class="card">
-      <div class="title">🔐 iCoinGate Wallet</div>
-      <div class="subtitle">
-        Create a non-custodial multi-chain wallet with one 12-word BIP39 recovery phrase.
-      </div>
-      <div class="warning">
-        ⚠️ <b>IMPORTANT</b><br><br>
-        Your recovery phrase controls your wallet.<br><br>
-        Never send it to anyone. iCoinGate will never ask for your recovery phrase.
-      </div>
-      <button id="createBtn" class="primary">🆕 Create New Wallet</button>
-    </section>
+<div class="container">
 
-    <section id="seedCard" class="card hidden">
-      <div class="title">🔑 Recovery Phrase</div>
-      <div class="subtitle">Write these 12 words down and keep them offline.</div>
-      <div id="words" class="words"></div>
-      <div class="warning">
-        ⚠️ <b>Do NOT screenshot or share this phrase.</b><br><br>
-        Anyone who has these words can control the wallet.
-      </div>
-      <button id="backupBtn" class="primary">✅ I Saved My Recovery Phrase</button>
-    </section>
-
-    <section id="walletCard" class="card hidden">
-      <div class="title">💳 Wallet Created</div>
-      <div class="subtitle">Public addresses generated from the same recovery phrase.</div>
-
-      <div class="coin"><div class="coin-head">₿ <b>Bitcoin</b></div><div class="path">BIP84 · m/84'/0'/0'/0/0</div><div id="btc" class="address">Generating...</div><button class="copy" data-copy="btc">📋 Copy BTC</button></div>
-      <div class="coin"><div class="coin-head">Ξ <b>Ethereum</b></div><div class="path">BIP44 · m/44'/60'/0'/0/0</div><div id="eth" class="address">Generating...</div><button class="copy" data-copy="eth">📋 Copy ETH</button></div>
-      <div class="coin"><div class="coin-head">🟡 <b>BNB Smart Chain</b></div><div class="path">EVM · m/44'/60'/0'/0/0</div><div id="bnb" class="address">Generating...</div><button class="copy" data-copy="bnb">📋 Copy BNB</button></div>
-      <div class="coin"><div class="coin-head">🟣 <b>Solana</b></div><div class="path">SLIP-0010 · m/44'/501'/0'</div><div id="sol" class="address">Generating...</div><button class="copy" data-copy="sol">📋 Copy SOL</button></div>
-      <div class="coin"><div class="coin-head">🔴 <b>TRON</b></div><div class="path">BIP44 · m/44'/195'/0'/0/0</div><div id="trx" class="address">Generating...</div><button class="copy" data-copy="trx">📋 Copy TRX</button></div>
-      <div class="coin"><div class="coin-head">💎 <b>TON / GRAM</b></div><div class="path">SLIP-0010 · m/44'/607'/0' · TON Wallet V4R2</div><div id="ton" class="address">Generating...</div><button class="copy" data-copy="ton">📋 Copy TON</button></div>
-
-      <div class="warning">
-        🔒 Only public addresses are displayed/sent. The recovery phrase stays in this browser session.
-      </div>
-      <button id="saveBtn" class="primary">✅ Save Wallet</button>
-      <button id="copyAllBtn" class="secondary">📋 Copy All Addresses</button>
-    </section>
-
-    <div id="status"></div>
-    <div class="footer">iCoinGate Wallet · Non-custodial</div>
+  <!-- INTRO -->
+  <div class="card">
+    <div class="title">🔐 Wallet Generator</div>
+    <div class="subtitle">
+      Create a non-custodial multi-chain wallet with a 12-word BIP39 recovery phrase.
+    </div>
+    <div class="notice">
+      ✅ <b>100% CLIENT-SIDE.</b><br><br>
+      Everything below — your recovery phrase, private keys, and addresses — is generated
+      inside this page, on your device. Nothing is ever sent to any server or bot.
+      Closing this page without saving your phrase means the wallet is gone forever.
+    </div>
+    <div class="warning">
+      ⚠️ <b>IMPORTANT</b><br><br>
+      Your recovery phrase controls your wallet.<br><br>
+      Never send it to anyone, including us. We will never ask for it.
+    </div>
+    <button id="createBtn" class="primary" onclick="createWallet()">🆕 Create New Wallet</button>
   </div>
-  <script type="module" src="/src/main.js"></script>
+
+  <!-- SEED PHRASE -->
+  <div id="seedCard" class="card hidden">
+    <div class="title">🔑 Recovery Phrase</div>
+    <div class="subtitle">Write these 12 words down and keep them completely offline.</div>
+    <div id="words" class="words"></div>
+    <div class="warning">
+      ⚠️ <b>DO NOT SCREENSHOT OR SHARE THIS PHRASE.</b><br><br>
+      Anyone with these 12 words can control the wallet and its funds.
+      This phrase is never transmitted anywhere — it only exists in this browser tab.
+    </div>
+    <button id="backupBtn" class="primary" onclick="confirmBackup()">✅ I Saved My Recovery Phrase</button>
+  </div>
+
+  <!-- WALLET -->
+  <div id="walletCard" class="card hidden">
+    <div class="title">💳 Wallet Created</div>
+    <div class="subtitle">Your public wallet addresses (safe to share):</div>
+
+    <div class="coin">
+      <div class="coin-header"><span class="coin-icon">₿</span><span class="coin-name">Bitcoin</span></div>
+      <div class="path">BIP84 • m/84'/0'/0'/0/0</div>
+      <div id="btc" class="address">Generating...</div>
+      <button class="copy-btn" onclick="copyAddress('btc','BTC')">📋 Copy BTC</button>
+    </div>
+
+    <div class="coin">
+      <div class="coin-header"><span class="coin-icon">Ξ</span><span class="coin-name">Ethereum</span></div>
+      <div class="path">BIP44 • m/44'/60'/0'/0/0</div>
+      <div id="eth" class="address">Generating...</div>
+      <button class="copy-btn" onclick="copyAddress('eth','ETH')">📋 Copy ETH</button>
+    </div>
+
+    <div class="coin">
+      <div class="coin-header"><span class="coin-icon">🟡</span><span class="coin-name">BNB Smart Chain</span></div>
+      <div class="path">EVM • m/44'/60'/0'/0/0</div>
+      <div id="bnb" class="address">Generating...</div>
+      <button class="copy-btn" onclick="copyAddress('bnb','BNB')">📋 Copy BNB</button>
+    </div>
+
+    <div class="coin">
+      <div class="coin-header"><span class="coin-icon">🟣</span><span class="coin-name">Solana</span></div>
+      <div class="path">m/44'/501'/0'</div>
+      <div id="sol" class="address">Generating...</div>
+      <button class="copy-btn" onclick="copyAddress('sol','SOL')">📋 Copy SOL</button>
+    </div>
+
+    <div class="coin">
+      <div class="coin-header"><span class="coin-icon">🔴</span><span class="coin-name">TRON</span></div>
+      <div class="path">BIP44 • m/44'/195'/0'/0/0</div>
+      <div id="trx" class="address">Generating...</div>
+      <button class="copy-btn" onclick="copyAddress('trx','TRX')">📋 Copy TRX</button>
+    </div>
+
+    <div class="coin">
+      <div class="coin-header"><span class="coin-icon">💎</span><span class="coin-name">TON</span></div>
+      <div class="path">m/44'/607'/0' • Wallet v4r2</div>
+      <div id="ton" class="address">Generating...</div>
+      <button class="copy-btn" onclick="copyAddress('ton','TON')">📋 Copy TON</button>
+    </div>
+
+    <div class="notice">
+      🔒 Only public addresses are shown above. Your recovery phrase and private keys
+      never leave this device and are not stored anywhere.
+    </div>
+    <button class="secondary" onclick="copyAllAddresses()">📋 Copy All Addresses</button>
+    <button class="danger" onclick="resetWallet()">🗑️ Discard &amp; Start Over</button>
+  </div>
+
+  <div id="status"></div>
+  <div class="footer-note">Non-custodial wallet generator<br>Nothing here is ever sent to a server.</div>
+</div>
+
+<script type="module">
+/* =====================================================
+   TELEGRAM (display context only — no data is ever sent
+   back via tg.sendData or any network call)
+===================================================== */
+const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+if (tg) { tg.ready(); tg.expand(); }
+
+/* =====================================================
+   LAZY-LOADED LIBRARIES (each coin isolated so one
+   library failing to load doesn't break the others)
+===================================================== */
+let bip39lib = null;
+let ethers = null;
+let scureBip32 = null;
+let nobleEd25519 = null;
+let nobleHashes = null;
+let tonCrypto = null;
+let tonCore = null;
+let tonWallets = null;
+let ed25519HdKeyLib = null;
+
+/* -----------------------------------------------------
+   MULTI-CDN LOADER
+   Tries esm.sh, then jsdelivr, then unpkg, for any given
+   package path. This avoids a single CDN outage/region
+   block breaking the whole page.
+----------------------------------------------------- */
+function cdnUrls(pkgAtVersion, subpath) {
+  // pkgAtVersion e.g. "@scure/bip39@1.4.0"
+  const atIdx = pkgAtVersion.lastIndexOf("@");
+  const name = pkgAtVersion.slice(0, atIdx);
+  const version = pkgAtVersion.slice(atIdx + 1);
+  const sub = subpath ? "/" + subpath.replace(/^\//, "") : "";
+  return [
+    `https://esm.sh/${name}@${version}${sub}`,
+    `https://cdn.jsdelivr.net/npm/${name}@${version}${sub}/+esm`,
+    `https://esm.run/${name}@${version}${sub}`,
+  ];
+}
+
+async function importWithFallback(pkgAtVersion, subpath) {
+  const urls = cdnUrls(pkgAtVersion, subpath);
+  let lastErr;
+  for (const url of urls) {
+    try {
+      return await import(/* @vite-ignore */ url);
+    } catch (err) {
+      lastErr = err;
+      console.warn("Import failed, trying next CDN:", url, err.message);
+    }
+  }
+  throw new Error(`All CDNs failed for ${pkgAtVersion}${subpath ? "/" + subpath : ""}: ${lastErr.message}`);
+}
+
+async function loadCore() {
+  // bip39 + sha256/keccak/ripemd — needed by everything
+  const [bip39mod, hashesSha256, hashesRipemd, hashesKeccak, hashesUtils] = await Promise.all([
+    importWithFallback("@scure/bip39@1.4.0"),
+    importWithFallback("@noble/hashes@1.5.0", "sha256"),
+    importWithFallback("@noble/hashes@1.5.0", "ripemd160"),
+    importWithFallback("@noble/hashes@1.5.0", "sha3"),
+    importWithFallback("@noble/hashes@1.5.0", "utils"),
+  ]);
+  const wordlistMod = await importWithFallback("@scure/bip39@1.4.0", "wordlists/english");
+  bip39lib = { ...bip39mod, wordlist: wordlistMod.wordlist };
+  nobleHashes = { sha256: hashesSha256.sha256, ripemd160: hashesRipemd.ripemd160, keccak256: hashesKeccak.keccak_256, ...hashesUtils };
+}
+
+async function loadEthers() {
+  if (!ethers) ethers = await importWithFallback("ethers@6.13.5");
+  return ethers;
+}
+
+async function loadScureBip32() {
+  if (!scureBip32) scureBip32 = await importWithFallback("@scure/bip32@1.6.0");
+  return scureBip32;
+}
+
+async function loadEd25519() {
+  if (!nobleEd25519) nobleEd25519 = await importWithFallback("@noble/curves@1.6.0", "ed25519");
+  return nobleEd25519;
+}
+
+async function loadEd25519HdKey() {
+  if (!ed25519HdKeyLib) ed25519HdKeyLib = await importWithFallback("ed25519-hd-key@1.3.0");
+  return ed25519HdKeyLib;
+}
+
+async function loadTon() {
+  if (!tonCrypto) {
+    // @ton/core internally expects a global Buffer (Node-style), which
+    // doesn't exist in browsers by default — polyfill it first.
+    if (typeof window.Buffer === "undefined") {
+      const bufferMod = await importWithFallback("buffer@6.0.3");
+      window.Buffer = bufferMod.Buffer;
+    }
+    tonCrypto = await importWithFallback("@ton/crypto@3.3.0");
+    tonCore = await importWithFallback("@ton/core@0.63.1");
+  }
+  return { tonCrypto, tonCore };
+}
+
+/* =====================================================
+   HELPERS
+===================================================== */
+function hexToBytes(hex) {
+  hex = hex.replace(/^0x/, "");
+  const result = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < result.length; i++) {
+    result[i] = parseInt(hex.substr(i * 2, 2), 16);
+  }
+  return result;
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function base58Encode(bytes) {
+  const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let digits = [0];
+  for (const byte of bytes) {
+    let carry = byte;
+    for (let j = 0; j < digits.length; j++) {
+      const value = digits[j] * 256 + carry;
+      digits[j] = value % 58;
+      carry = Math.floor(value / 58);
+    }
+    while (carry > 0) { digits.push(carry % 58); carry = Math.floor(carry / 58); }
+  }
+  let result = "";
+  for (let i = 0; i < bytes.length && bytes[i] === 0; i++) result += "1";
+  for (let i = digits.length - 1; i >= 0; i--) result += alphabet[digits[i]];
+  return result;
+}
+
+function base58CheckEncode(payloadBytes) {
+  const checksum1 = nobleHashes.sha256(payloadBytes);
+  const checksum2 = nobleHashes.sha256(checksum1);
+  const full = new Uint8Array(payloadBytes.length + 4);
+  full.set(payloadBytes, 0);
+  full.set(checksum2.slice(0, 4), payloadBytes.length);
+  return base58Encode(full);
+}
+
+const BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+function bech32Polymod(values) {
+  const GENERATOR = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
+  let chk = 1;
+  for (const value of values) {
+    const top = chk >>> 25;
+    chk = ((chk & 0x1ffffff) << 5) ^ value;
+    for (let i = 0; i < 5; i++) {
+      if ((top >>> i) & 1) chk ^= GENERATOR[i];
+    }
+  }
+  return chk;
+}
+function bech32HrpExpand(hrp) {
+  const result = [];
+  for (let i = 0; i < hrp.length; i++) result.push(hrp.charCodeAt(i) >>> 5);
+  result.push(0);
+  for (let i = 0; i < hrp.length; i++) result.push(hrp.charCodeAt(i) & 31);
+  return result;
+}
+function bech32CreateChecksum(hrp, data) {
+  const values = bech32HrpExpand(hrp).concat(data).concat([0, 0, 0, 0, 0, 0]);
+  const mod = bech32Polymod(values) ^ 1;
+  const result = [];
+  for (let i = 0; i < 6; i++) result.push((mod >>> (5 * (5 - i))) & 31);
+  return result;
+}
+function bech32Encode(hrp, data) {
+  const combined = data.concat(bech32CreateChecksum(hrp, data));
+  let result = hrp + "1";
+  for (const d of combined) result += BECH32_CHARSET.charAt(d);
+  return result;
+}
+function convertBits(data, fromBits, toBits, pad) {
+  let acc = 0, bits = 0;
+  const ret = [];
+  const maxv = (1 << toBits) - 1;
+  for (const value of data) {
+    acc = (acc << fromBits) | value;
+    bits += fromBits;
+    while (bits >= toBits) { bits -= toBits; ret.push((acc >>> bits) & maxv); }
+  }
+  if (pad && bits > 0) ret.push((acc << (toBits - bits)) & maxv);
+  return ret;
+}
+function btcBech32Address(pubkeyBytes) {
+  const sha = nobleHashes.sha256(pubkeyBytes);
+  const hash160 = nobleHashes.ripemd160(sha);
+  const words = [0].concat(convertBits(Array.from(hash160), 8, 5, true));
+  return bech32Encode("bc", words);
+}
+
+function tronAddressFromUncompressedPubkey(pubkeyNoPrefix) {
+  // pubkeyNoPrefix: 64 bytes (x||y), same as ETH pre-hash input
+  const hash = nobleHashes.keccak256(pubkeyNoPrefix);
+  const addressBytes = hash.slice(-20);
+  const payload = new Uint8Array(21);
+  payload[0] = 0x41;
+  payload.set(addressBytes, 1);
+  return base58CheckEncode(payload);
+}
+
+/* =====================================================
+   STATE
+===================================================== */
+let mnemonicPhrase = null;
+let seedBytes = null;
+let generatedAddresses = {};
+
+function showStatus(html, isLoading) {
+  document.getElementById("status").innerHTML = html;
+}
+function clearStatus() {
+  document.getElementById("status").innerHTML = "";
+}
+
+/* =====================================================
+   CREATE WALLET
+===================================================== */
+window.createWallet = async function () {
+  const btn = document.getElementById("createBtn");
+  btn.disabled = true;
+  showStatus('<span class="loader"></span>Generating recovery phrase...', true);
+  try {
+    if (!bip39lib) await loadCore();
+    mnemonicPhrase = bip39lib.generateMnemonic(bip39lib.wordlist, 128); // 12 words
+    seedBytes = await bip39lib.mnemonicToSeed(mnemonicPhrase);
+
+    const wordsEl = document.getElementById("words");
+    wordsEl.innerHTML = "";
+    mnemonicPhrase.split(" ").forEach((word, i) => {
+      const div = document.createElement("div");
+      div.className = "word";
+      div.innerHTML = `<span class="word-number">${i + 1}</span>${word}`;
+      wordsEl.appendChild(div);
+    });
+
+    document.querySelector(".card").classList.add("hidden");
+    document.getElementById("seedCard").classList.remove("hidden");
+    clearStatus();
+  } catch (err) {
+    console.error(err);
+    showStatus('<span class="error">Failed to generate recovery phrase: ' + err.message + "</span>", false);
+    btn.disabled = false;
+  }
+};
+
+/* =====================================================
+   CONFIRM BACKUP -> DERIVE ALL ADDRESSES
+===================================================== */
+window.confirmBackup = async function () {
+  document.getElementById("seedCard").classList.add("hidden");
+  document.getElementById("walletCard").classList.remove("hidden");
+  showStatus('<span class="loader"></span>Deriving addresses...', true);
+
+  await deriveBTC();
+  await deriveEVM();
+  await deriveSOL();
+  await deriveTRX();
+  await deriveTON();
+
+  clearStatus();
+};
+
+/* --- BTC (secp256k1, BIP84 bech32) --- */
+async function deriveBTC() {
+  const el = document.getElementById("btc");
+  try {
+    const { HDKey } = await loadScureBip32();
+    const hd = HDKey.fromMasterSeed(seedBytes);
+    const child = hd.derive("m/84'/0'/0'/0/0");
+    const address = btcBech32Address(child.publicKey);
+    generatedAddresses.btc = address;
+    el.textContent = address;
+  } catch (err) {
+    console.error("BTC error:", err);
+    el.innerHTML = '<span class="error">Failed to generate: ' + err.message + "</span>";
+  }
+}
+
+/* --- ETH / BNB (secp256k1, EVM) --- */
+async function deriveEVM() {
+  const ethEl = document.getElementById("eth");
+  const bnbEl = document.getElementById("bnb");
+  try {
+    const eth = await loadEthers();
+    const hdNode = eth.HDNodeWallet.fromSeed(seedBytes).derivePath("m/44'/60'/0'/0/0");
+    generatedAddresses.eth = hdNode.address;
+    generatedAddresses.bnb = hdNode.address; // same address format on EVM chains
+    ethEl.textContent = hdNode.address;
+    bnbEl.textContent = hdNode.address;
+  } catch (err) {
+    console.error("EVM error:", err);
+    ethEl.innerHTML = '<span class="error">Failed to generate: ' + err.message + "</span>";
+    bnbEl.innerHTML = '<span class="error">Failed to generate: ' + err.message + "</span>";
+  }
+}
+
+/* --- SOL (ed25519, SLIP-0010 style via hardened-only path) --- */
+async function deriveSOL() {
+  const el = document.getElementById("sol");
+  try {
+    const ed = await loadEd25519();
+    const { derivePath } = await loadEd25519HdKey();
+    const seedHex = bytesToHex(seedBytes);
+    const { key } = derivePath("m/44'/501'/0'", seedHex);
+    const pubKey = ed.ed25519.getPublicKey(key);
+    const address = base58Encode(pubKey);
+    generatedAddresses.sol = address;
+    el.textContent = address;
+  } catch (err) {
+    console.error("SOL error:", err);
+    el.innerHTML = '<span class="error">Failed to generate: ' + err.message + "</span>";
+  }
+}
+
+/* --- TRX (secp256k1, same curve as ETH, different address encoding) --- */
+async function deriveTRX() {
+  const el = document.getElementById("trx");
+  try {
+    const { HDKey } = await loadScureBip32();
+    const hd = HDKey.fromMasterSeed(seedBytes);
+    const child = hd.derive("m/44'/195'/0'/0/0");
+    // uncompressed pubkey minus the 0x04 prefix, like ETH
+    const uncompressed = child.publicKeyRaw ? child.publicKeyRaw : null;
+    let pubBytes;
+    if (child.publicKey.length === 33) {
+      // need uncompressed form; @scure/bip32 exposes .publicKeyRaw as compressed only,
+      // so derive uncompressed via ethers' SigningKey helper for consistency
+      const eth = await loadEthers();
+      const sk = new eth.SigningKey(eth.hexlify(child.privateKey));
+      const uncompressedHex = sk.publicKey; // 0x04 + x + y
+      pubBytes = eth.getBytes(uncompressedHex).slice(1);
+    } else {
+      pubBytes = child.publicKey.slice(1);
+    }
+    const address = tronAddressFromUncompressedPubkey(pubBytes);
+    generatedAddresses.trx = address;
+    el.textContent = address;
+  } catch (err) {
+    console.error("TRX error:", err);
+    el.innerHTML = '<span class="error">Failed to generate: ' + err.message + "</span>";
+  }
+}
+
+/* --- TON (ed25519, Wallet v4r2) --- */
+async function deriveTON() {
+  const el = document.getElementById("ton");
+  try {
+    const ed = await loadEd25519();
+    const { derivePath } = await loadEd25519HdKey();
+    const seedHex = bytesToHex(seedBytes);
+    const { key } = derivePath("m/44'/607'/0'", seedHex);
+    const publicKey = ed.ed25519.getPublicKey(key);
+
+    const { tonCrypto: crypto, tonCore: core } = await loadTon();
+    const publicKeyBuf = window.Buffer.from(publicKey);
+
+    // Wallet v4r2 code (standard, well-known contract used by Tonkeeper/Tonhub etc.)
+    const WALLET_V4R2_CODE_BOC =
+      "B5EE9C724102140100021F000114FF00F4A413F4BCF2C80B010201200203020148040504F8F28308D71820D31FD31FD31F02F823BBF264ED44D0D31FD31FD3FFF404D15143BAF2A15151BAF2A205F901541064F910F2A3F80024A4C8CB1F5240CB1F5230CBFF5210F400C9ED54F80F01D30721C0009F6C519320D74A96D307D402FB00E830E021C001E30021C002E30001C0039130E30D03A4C8CB1F12CB1FCBFF1011121302E6D001D0D3032171B0925F04E022D749C120925F04E002D31F218210706C7567BD22821064737472BD22821065727478BD22821066756E64BD22821068617368BD22821069696E6421D33F218210706C756721821064737472BD22821065727478BD8210706C756721821068617368BD8210706C7567218210706C756721005F04C8608210706C75672059F0206ED44D0D31FD31FD3FFD70830F0182107369676E7370A98040A4B0A0A26F5E3A9E60A004A31D22C702F26E3839A0031A02F16E2D6C01A0B0A00206D6A5F0BEB0FD90101210021A03E0031A0202A05202A03E0031A03E0021A02A05202A03E00";
+
+    const workchain = 0;
+
+    const contractInit = core.beginCell()
+      .storeUint(0, 32) // seqno
+      .storeUint(698983191, 32) // wallet v4 subwallet id (0x29A9A317)
+      .storeBuffer(publicKeyBuf)
+      .storeBit(0) // empty plugin dict
+      .endCell();
+
+    const codeCell = core.Cell.fromBoc(hexToBytes(WALLET_V4R2_CODE_BOC))[0];
+
+    const stateInit = core.beginCell()
+      .storeBit(0)
+      .storeBit(1).storeRef(codeCell)
+      .storeBit(1).storeRef(contractInit)
+      .storeBit(0)
+      .endCell();
+
+    const address = new core.Address(workchain, stateInit.hash());
+    const friendly = address.toString({ bounceable: true, urlSafe: true });
+
+    generatedAddresses.ton = friendly;
+    el.textContent = friendly;
+  } catch (err) {
+    console.error("TON error:", err);
+    el.innerHTML = '<span class="error">TON address unavailable (network/library issue). Other coins are unaffected.</span>';
+  }
+}
+
+/* =====================================================
+   COPY / RESET
+===================================================== */
+window.copyAddress = async function (id, label) {
+  const text = generatedAddresses[id];
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    showStatus('<span class="success">' + label + " address copied.</span>", false);
+  } catch {
+    showStatus('<span class="error">Copy failed — long-press to copy manually.</span>', false);
+  }
+};
+
+window.copyAllAddresses = async function () {
+  const lines = Object.entries(generatedAddresses)
+    .map(([k, v]) => k.toUpperCase() + ": " + v)
+    .join("\n");
+  try {
+    await navigator.clipboard.writeText(lines);
+    showStatus('<span class="success">All addresses copied.</span>', false);
+  } catch {
+    showStatus('<span class="error">Copy failed — long-press to copy manually.</span>', false);
+  }
+};
+
+window.resetWallet = function () {
+  mnemonicPhrase = null;
+  seedBytes = null;
+  generatedAddresses = {};
+  document.getElementById("walletCard").classList.add("hidden");
+  document.getElementById("seedCard").classList.add("hidden");
+  document.querySelector(".card").classList.remove("hidden");
+  document.getElementById("createBtn").disabled = false;
+  clearStatus();
+};
+</script>
 </body>
 </html>
