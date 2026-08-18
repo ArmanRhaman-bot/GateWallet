@@ -1,12 +1,15 @@
 import express from "express";
+
 import {
   HDNodeWallet,
   Mnemonic,
   JsonRpcProvider,
   Contract,
+  Interface,
   parseUnits,
   formatUnits
 } from "ethers";
+
 import pg from "pg";
 
 const { Pool } = pg;
@@ -20,9 +23,9 @@ app.use(
 );
 
 
-// =====================================================
-// ENV
-// =====================================================
+/* =========================================================
+   SERVER CONFIG
+========================================================= */
 
 const PORT =
   process.env.PORT || 3000;
@@ -37,12 +40,15 @@ const DATABASE_URL =
   process.env.DATABASE_URL;
 
 
+/* =========================================================
+   REQUIRED ENV CHECK
+========================================================= */
+
 if (
   !API_KEY ||
   !MASTER_MNEMONIC ||
   !DATABASE_URL
 ) {
-
   console.error(
     "Missing BOT_API_KEY, MASTER_MNEMONIC or DATABASE_URL"
   );
@@ -51,46 +57,39 @@ if (
 }
 
 
-// =====================================================
-// DATABASE
-// =====================================================
+/* =========================================================
+   DATABASE
+========================================================= */
 
-const pool =
-  new Pool({
+const pool = new Pool({
+  connectionString: DATABASE_URL,
 
-    connectionString:
-      DATABASE_URL,
-
-    ssl:
-      DATABASE_URL.includes("localhost")
-        ? false
-        : {
-            rejectUnauthorized: false
-          }
-
-  });
+  ssl:
+    DATABASE_URL.includes("localhost")
+      ? false
+      : {
+          rejectUnauthorized: false
+        }
+});
 
 
-// =====================================================
-// CHAINS
-// =====================================================
+/* =========================================================
+   BLOCKCHAIN NETWORKS
+========================================================= */
 
 const chains = {
 
   bsc: {
 
-    name:
-      "BSC",
+    name: "BSC",
 
     rpc:
       process.env.BSC_RPC_URL ||
       "https://bsc-dataseed.binance.org",
 
-    chainId:
-      56,
+    chainId: 56,
 
-    native:
-      "BNB",
+    native: "BNB",
 
     explorer:
       "https://bscscan.com/tx/"
@@ -100,18 +99,15 @@ const chains = {
 
   eth: {
 
-    name:
-      "Ethereum",
+    name: "Ethereum",
 
     rpc:
       process.env.ETH_RPC_URL ||
       "https://cloudflare-eth.com",
 
-    chainId:
-      1,
+    chainId: 1,
 
-    native:
-      "ETH",
+    native: "ETH",
 
     explorer:
       "https://etherscan.io/tx/"
@@ -121,9 +117,9 @@ const chains = {
 };
 
 
-// =====================================================
-// TOKENS
-// =====================================================
+/* =========================================================
+   ERC20 TOKENS
+========================================================= */
 
 const tokens = {
 
@@ -134,28 +130,27 @@ const tokens = {
       address:
         "0x55d398326f99059f775485246999027b3197955",
 
-      decimals:
-        18
+      decimals: 18
 
     },
+
 
     USDC: {
 
       address:
         "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
 
-      decimals:
-        18
+      decimals: 18
 
     },
+
 
     BUSD: {
 
       address:
         "0xe9e7cea3dedca5984780bafc599bd69add087d56",
 
-      decimals:
-        18
+      decimals: 18
 
     }
 
@@ -169,28 +164,27 @@ const tokens = {
       address:
         "0xdAC17F958D2ee523a2206206994597C13D831ec7",
 
-      decimals:
-        6
+      decimals: 6
 
     },
+
 
     USDC: {
 
       address:
         "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
 
-      decimals:
-        6
+      decimals: 6
 
     },
+
 
     BUSD: {
 
       address:
         "0x4fabb145d64652a948d72533023f6e7a623c7c53",
 
-      decimals:
-        18
+      decimals: 18
 
     }
 
@@ -199,9 +193,9 @@ const tokens = {
 };
 
 
-// =====================================================
-// ERC20 ABI
-// =====================================================
+/* =========================================================
+   ERC20 ABI
+========================================================= */
 
 const ERC20_ABI = [
 
@@ -214,17 +208,17 @@ const ERC20_ABI = [
 ];
 
 
-// =====================================================
-// ERC20 TRANSFER EVENT TOPIC
-// =====================================================
+/* =========================================================
+   INTERFACE
+========================================================= */
 
-const TRANSFER_TOPIC =
-  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a9df523b3ef";
+const ERC20_INTERFACE =
+  new Interface(ERC20_ABI);
 
 
-// =====================================================
-// MASTER HD WALLET
-// =====================================================
+/* =========================================================
+   MASTER HD WALLET
+========================================================= */
 
 const mnemonic =
   Mnemonic.fromPhrase(
@@ -238,9 +232,9 @@ const master =
   );
 
 
-// =====================================================
-// AUTH
-// =====================================================
+/* =========================================================
+   AUTHENTICATION
+========================================================= */
 
 function auth(
   req,
@@ -248,15 +242,14 @@ function auth(
   next
 ) {
 
-  if (
-    req.get("x-api-key") !==
-    API_KEY
-  ) {
+  const key =
+    req.get("x-api-key");
+
+  if (key !== API_KEY) {
 
     return res.status(401).json({
 
-      ok:
-        false,
+      ok: false,
 
       error:
         "Unauthorized"
@@ -270,9 +263,9 @@ function auth(
 }
 
 
-// =====================================================
-// TELEGRAM ID VALIDATION
-// =====================================================
+/* =========================================================
+   TELEGRAM ID VALIDATION
+========================================================= */
 
 function validTelegramId(v) {
 
@@ -283,9 +276,9 @@ function validTelegramId(v) {
 }
 
 
-// =====================================================
-// DERIVE USER WALLET
-// =====================================================
+/* =========================================================
+   DERIVE WALLET
+========================================================= */
 
 function derive(index) {
 
@@ -296,13 +289,11 @@ function derive(index) {
 }
 
 
-// =====================================================
-// PROVIDER
-// =====================================================
+/* =========================================================
+   PROVIDER
+========================================================= */
 
-function provider(
-  chain
-) {
+function provider(chain) {
 
   const c =
     chains[chain];
@@ -323,9 +314,9 @@ function provider(
 }
 
 
-// =====================================================
-// DATABASE INITIALIZATION
-// =====================================================
+/* =========================================================
+   DATABASE INITIALIZATION
+========================================================= */
 
 async function initDb() {
 
@@ -336,12 +327,10 @@ async function initDb() {
       START 0
       MINVALUE 0;
 
-
     CREATE TABLE IF NOT EXISTS
       wallet_users (
 
-      id
-        BIGSERIAL PRIMARY KEY,
+      id BIGSERIAL PRIMARY KEY,
 
       telegram_id
         TEXT UNIQUE NOT NULL,
@@ -353,8 +342,7 @@ async function initDb() {
         TEXT UNIQUE NOT NULL,
 
       created_at
-        TIMESTAMPTZ
-        NOT NULL
+        TIMESTAMPTZ NOT NULL
         DEFAULT NOW()
 
     );
@@ -363,8 +351,7 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS
       deposits (
 
-      id
-        BIGSERIAL PRIMARY KEY,
+      id BIGSERIAL PRIMARY KEY,
 
       telegram_id
         TEXT NOT NULL,
@@ -398,8 +385,7 @@ async function initDb() {
         DEFAULT 'pending',
 
       created_at
-        TIMESTAMPTZ
-        NOT NULL
+        TIMESTAMPTZ NOT NULL
         DEFAULT NOW(),
 
       UNIQUE(
@@ -424,35 +410,28 @@ async function initDb() {
     );
 
 
-    CREATE TABLE IF NOT EXISTS
-      scanner_state (
-
-      chain
-        TEXT PRIMARY KEY,
-
-      last_block
-        BIGINT NOT NULL
-
-    );
-
-
     CREATE INDEX IF NOT EXISTS
       deposits_status_idx
       ON deposits(status,id);
 
 
     CREATE INDEX IF NOT EXISTS
-      deposits_user_idx
+      deposits_telegram_idx
       ON deposits(telegram_id,id);
+
+
+    CREATE INDEX IF NOT EXISTS
+      deposits_tx_idx
+      ON deposits(tx_hash);
 
   `);
 
 }
 
 
-// =====================================================
-// GET OR CREATE USER WALLET
-// =====================================================
+/* =========================================================
+   CREATE OR GET USER WALLET
+========================================================= */
 
 async function getOrCreateWallet(
   telegramId
@@ -473,23 +452,18 @@ async function getOrCreateWallet(
       WHERE telegram_id=$1
       `,
 
-      [
-        telegramId
-      ]
+      [telegramId]
 
     );
 
 
-  if (
-    old.rows[0]
-  ) {
+  if (old.rows[0]) {
 
     return {
 
       ...old.rows[0],
 
-      existing:
-        true
+      existing: true
 
     };
 
@@ -524,16 +498,12 @@ async function getOrCreateWallet(
         FOR UPDATE
         `,
 
-        [
-          telegramId
-        ]
+        [telegramId]
 
       );
 
 
-    if (
-      again.rows[0]
-    ) {
+    if (again.rows[0]) {
 
       await client.query(
         "COMMIT"
@@ -544,8 +514,7 @@ async function getOrCreateWallet(
 
         ...again.rows[0],
 
-        existing:
-          true
+        existing: true
 
       };
 
@@ -579,15 +548,14 @@ async function getOrCreateWallet(
       await client.query(
 
         `
-        INSERT INTO wallet_users
-        (
-          telegram_id,
-          wallet_index,
-          address
-        )
+        INSERT INTO
+          wallet_users(
+            telegram_id,
+            wallet_index,
+            address
+          )
 
-        VALUES
-        (
+        VALUES(
           $1,
           $2,
           $3
@@ -618,8 +586,7 @@ async function getOrCreateWallet(
 
       ...inserted.rows[0],
 
-      existing:
-        false
+      existing: false
 
     };
 
@@ -654,1619 +621,61 @@ async function getOrCreateWallet(
 }
 
 
-// =====================================================
-// WALLET MAP
-// address -> telegram_id
-// =====================================================
+/* =========================================================
+   TOKEN NORMALIZATION
+========================================================= */
 
-async function getWalletMap() {
-
-  const q =
-    await pool.query(`
-
-      SELECT
-        telegram_id,
-        address
-
-      FROM wallet_users
-
-    `);
-
-
-  const map =
-    new Map();
-
-
-  for (
-    const row of q.rows
-  ) {
-
-    map.set(
-
-      row.address.toLowerCase(),
-
-      row.telegram_id
-
-    );
-
-  }
-
-
-  return map;
-
-}
-
-
-// =====================================================
-// ERC20 TOKEN SCANNER
-// =====================================================
-
-async function scanTokenRange(
-
-  chainKey,
-
-  symbol,
-
-  info,
-
-  fromBlock,
-
-  toBlock,
-
-  walletMap
-
+function normalizeAddress(
+  address
 ) {
 
-  const p =
-    provider(
-      chainKey
-    );
-
-
-  const logs =
-    await p.getLogs({
-
-      address:
-        info.address,
-
-      topics: [
-
-        TRANSFER_TOPIC,
-
-        null,
-
-        null
-
-      ],
-
-      fromBlock:
-        fromBlock,
-
-      toBlock:
-        toBlock
-
-    });
-
-
-  for (
-    const log of logs
-  ) {
-
-    try {
-
-      if (
-        !log.topics ||
-        log.topics.length < 3
-      ) {
-
-        continue;
-
-      }
-
-
-      // indexed "to" address
-      const toAddress =
-        "0x" +
-        log.topics[2].slice(-40);
-
-
-      const telegramId =
-        walletMap.get(
-
-          toAddress.toLowerCase()
-
-        );
-
-
-      if (
-        !telegramId
-      ) {
-
-        continue;
-
-      }
-
-
-      const value =
-        BigInt(
-          log.data
-        );
-
-
-      if (
-        value <= 0n
-      ) {
-
-        continue;
-
-      }
-
-
-      const amount =
-        formatUnits(
-
-          value,
-
-          info.decimals
-
-        );
-
-
-      const txHash =
-        log.transactionHash;
-
-
-      const logIndex =
-        Number(
-          log.index
-        );
-
-
-      await pool.query(
-
-        `
-        INSERT INTO deposits
-        (
-          telegram_id,
-          chain,
-          symbol,
-          amount,
-          tx_hash,
-          log_index,
-          block_number,
-          confirmations,
-          status
-        )
-
-        VALUES
-        (
-          $1,
-          $2,
-          $3,
-          $4,
-          $5,
-          $6,
-          $7,
-          0,
-          'pending'
-        )
-
-        ON CONFLICT
-        (
-          chain,
-          tx_hash,
-          log_index
-        )
-
-        DO NOTHING
-        `,
-
-        [
-
-          telegramId,
-
-          chainKey,
-
-          symbol,
-
-          amount,
-
-          txHash,
-
-          logIndex,
-
-          Number(
-            log.blockNumber
-          )
-
-        ]
-
-      );
-
-
-    } catch (e) {
-
-      console.error(
-
-        "Token log error:",
-
-        chainKey,
-
-        symbol,
-
-        e.message
-
-      );
-
-    }
-
-  }
+  return String(
+    address || ""
+  ).toLowerCase();
 
 }
 
 
-// =====================================================
-// NATIVE BNB / ETH SCANNER
-// =====================================================
+/* =========================================================
+   EXPLORER LINK
+========================================================= */
 
-async function scanNativeRange(
-
-  chainKey,
-
-  fromBlock,
-
-  toBlock,
-
-  walletMap
-
+function getExplorerUrl(
+  chain,
+  txHash
 ) {
 
-  const p =
-    provider(
-      chainKey
-    );
-
-
-  for (
-
-    let blockNumber =
-      fromBlock;
-
-    blockNumber <=
-      toBlock;
-
-    blockNumber++
-
-  ) {
-
-    try {
-
-      const block =
-        await p.getBlock(
-
-          blockNumber,
-
-          true
-
-        );
-
-
-      if (
-        !block
-      ) {
-
-        continue;
-
-      }
-
-
-      const transactions =
-        block.prefetchedTransactions || [];
-
-
-      for (
-        const tx of transactions
-      ) {
-
-        try {
-
-          if (
-            !tx.to
-          ) {
-
-            continue;
-
-          }
-
-
-          const telegramId =
-            walletMap.get(
-
-              tx.to.toLowerCase()
-
-            );
-
-
-          if (
-            !telegramId
-          ) {
-
-            continue;
-
-          }
-
-
-          if (
-            !tx.value ||
-            tx.value <= 0n
-          ) {
-
-            continue;
-
-          }
-
-
-          const receipt =
-            await p.getTransactionReceipt(
-              tx.hash
-            );
-
-
-          if (
-            !receipt ||
-            receipt.status !== 1
-          ) {
-
-            continue;
-
-          }
-
-
-          const amount =
-            formatUnits(
-
-              tx.value,
-
-              18
-
-            );
-
-
-          await pool.query(
-
-            `
-            INSERT INTO deposits
-            (
-              telegram_id,
-              chain,
-              symbol,
-              amount,
-              tx_hash,
-              log_index,
-              block_number,
-              confirmations,
-              status
-            )
-
-            VALUES
-            (
-              $1,
-              $2,
-              $3,
-              $4,
-              $5,
-              -1,
-              $6,
-              0,
-              'pending'
-            )
-
-            ON CONFLICT
-            (
-              chain,
-              tx_hash,
-              log_index
-            )
-
-            DO NOTHING
-            `,
-
-            [
-
-              telegramId,
-
-              chainKey,
-
-              chains[
-                chainKey
-              ].native,
-
-              amount,
-
-              tx.hash,
-
-              blockNumber
-
-            ]
-
-          );
-
-
-        } catch (txError) {
-
-          console.error(
-
-            "Native tx error:",
-
-            chainKey,
-
-            tx.hash,
-
-            txError.message
-
-          );
-
-        }
-
-      }
-
-
-    } catch (e) {
-
-      console.error(
-
-        "Native block scan error:",
-
-        chainKey,
-
-        blockNumber,
-
-        e.message
-
-      );
-
-    }
-
-  }
+  return (
+    chains[chain]?.explorer ||
+    ""
+  ) + txHash;
 
 }
 
 
-// =====================================================
-// MAIN BLOCK SCANNER
-// =====================================================
+/* =========================================================
+   SCAN RANGE
+========================================================= */
 
-async function scanAll() {
+function getScanDepth() {
 
-  const walletMap =
-    await getWalletMap();
-
+  const value =
+    Number(
+      process.env.SCAN_BLOCKS || 100
+    );
 
   if (
-    walletMap.size === 0
+    !Number.isFinite(value) ||
+    value <= 0
   ) {
 
-    return;
+    return 100;
 
   }
 
-
-  const scanBlocks =
-    Number(
-      process.env.SCAN_BLOCKS ||
-      100
-    );
-
-
-  const chunkSize =
-    50;
-
-
-  for (
-    const chainKey
-    of Object.keys(chains)
-  ) {
-
-    try {
-
-      const p =
-        provider(
-          chainKey
-        );
-
-
-      const latest =
-        await p.getBlockNumber();
-
-
-      const state =
-        await pool.query(
-
-          `
-          SELECT
-            last_block
-
-          FROM scanner_state
-
-          WHERE chain=$1
-          `,
-
-          [
-            chainKey
-          ]
-
-        );
-
-
-      let fromBlock;
-
-
-      if (
-        !state.rows[0]
-      ) {
-
-        fromBlock =
-          Math.max(
-
-            0,
-
-            latest -
-              scanBlocks
-
-          );
-
-      } else {
-
-        fromBlock =
-          Number(
-            state.rows[0]
-              .last_block
-          ) + 1;
-
-      }
-
-
-      if (
-        fromBlock >
-        latest
-      ) {
-
-        continue;
-
-      }
-
-
-      for (
-
-        let start =
-          fromBlock;
-
-        start <= latest;
-
-        start +=
-          chunkSize
-
-      ) {
-
-        const end =
-          Math.min(
-
-            latest,
-
-            start +
-              chunkSize -
-              1
-
-          );
-
-
-        // ---------------------------------------------
-        // BNB / ETH
-        // ---------------------------------------------
-
-        await scanNativeRange(
-
-          chainKey,
-
-          start,
-
-          end,
-
-          walletMap
-
-        );
-
-
-        // ---------------------------------------------
-        // USDT / USDC / BUSD
-        // ---------------------------------------------
-
-        const chainTokens =
-          tokens[
-            chainKey
-          ] || {};
-
-
-        for (
-
-          const [
-            symbol,
-            info
-          ]
-
-          of Object.entries(
-            chainTokens
-          )
-
-        ) {
-
-          await scanTokenRange(
-
-            chainKey,
-
-            symbol,
-
-            info,
-
-            start,
-
-            end,
-
-            walletMap
-
-          );
-
-        }
-
-
-        // ---------------------------------------------
-        // SAVE SCANNER POSITION
-        // ---------------------------------------------
-
-        await pool.query(
-
-          `
-          INSERT INTO scanner_state
-          (
-            chain,
-            last_block
-          )
-
-          VALUES
-          (
-            $1,
-            $2
-          )
-
-          ON CONFLICT(chain)
-
-          DO UPDATE SET
-            last_block =
-              EXCLUDED.last_block
-          `,
-
-          [
-            chainKey,
-            end
-          ]
-
-        );
-
-      }
-
-
-    } catch (e) {
-
-      console.error(
-
-        "Scanner chain error:",
-
-        chainKey,
-
-        e.message
-
-      );
-
-    }
-
-  }
-
-}
-
-
-// =====================================================
-// UPDATE CONFIRMATIONS
-// =====================================================
-
-async function updateConfirmations() {
-
-  const required =
-    Number(
-      process.env.CONFIRMATIONS ||
-      3
-    );
-
-
-  for (
-    const chainKey
-    of Object.keys(chains)
-  ) {
-
-    try {
-
-      const latest =
-        await provider(
-          chainKey
-        ).getBlockNumber();
-
-
-      const rows =
-        await pool.query(
-
-          `
-          SELECT
-            id,
-            block_number
-
-          FROM deposits
-
-          WHERE
-            chain=$1
-
-          AND
-            status='pending'
-          `,
-
-          [
-            chainKey
-          ]
-
-        );
-
-
-      for (
-        const row
-        of rows.rows
-      ) {
-
-        const confirmations =
-          Math.max(
-
-            0,
-
-            latest -
-              Number(
-                row.block_number
-              ) +
-              1
-
-          );
-
-
-        const status =
-          confirmations >=
-          required
-
-            ? "confirmed"
-
-            : "pending";
-
-
-        await pool.query(
-
-          `
-          UPDATE deposits
-
-          SET
-            confirmations=$2,
-            status=$3
-
-          WHERE id=$1
-          `,
-
-          [
-
-            row.id,
-
-            confirmations,
-
-            status
-
-          ]
-
-        );
-
-      }
-
-
-    } catch (e) {
-
-      console.error(
-
-        "Confirmation error:",
-
-        chainKey,
-
-        e.message
-
-      );
-
-    }
-
-  }
-
-}
-
-
-// =====================================================
-// ROOT
-// =====================================================
-
-app.get(
-  "/",
-  (req, res) => {
-
-    res.json({
-
-      message:
-        "🚀 iCoinGate EVM Wallet API",
-
-      networks: [
-
-        "BNB BEP20",
-
-        "Ethereum ERC20"
-
-      ],
-
-      endpoints: {
-
-        createOrGetWallet:
-          "POST /wallet",
-
-        getWallet:
-          "GET /wallet/:telegramId",
-
-        deposits:
-          "GET /deposits?telegramId=USER_ID&status=confirmed",
-
-        withdraw:
-          "POST /withdraw",
-
-        health:
-          "GET /health"
-
-      }
-
-    });
-
-  }
-);
-
-
-// =====================================================
-// HEALTH
-// =====================================================
-
-app.get(
-  "/health",
-  async (req, res) => {
-
-    try {
-
-      await pool.query(
-        "SELECT 1"
-      );
-
-
-      res.json({
-
-        ok:
-          true,
-
-        service:
-          "iCoinGate EVM Wallet API"
-
-      });
-
-
-    } catch (e) {
-
-      res.status(503).json({
-
-        ok:
-          false,
-
-        error:
-          "Database unavailable"
-
-      });
-
-    }
-
-  }
-);
-
-
-// =====================================================
-// CREATE / GET WALLET
-// =====================================================
-
-app.post(
-  "/wallet",
-  auth,
-  async (req, res) => {
-
-    try {
-
-      const telegramId =
-        String(
-          req.body.telegramId ||
-          ""
-        );
-
-
-      if (
-        !validTelegramId(
-          telegramId
-        )
-      ) {
-
-        return res.status(400).json({
-
-          ok:
-            false,
-
-          error:
-            "Invalid Telegram ID"
-
-        });
-
-      }
-
-
-      const row =
-        await getOrCreateWallet(
-          telegramId
-        );
-
-
-      res.json({
-
-        ok:
-          true,
-
-        existing:
-          row.existing,
-
-        network:
-          "EVM",
-
-        address:
-          row.address,
-
-        walletIndex:
-          Number(
-            row.wallet_index
-          ),
-
-        networks: [
-
-          "Ethereum ERC20",
-
-          "BNB BEP20"
-
-        ]
-
-      });
-
-
-    } catch (e) {
-
-      console.error(e);
-
-
-      res.status(500).json({
-
-        ok:
-          false,
-
-        error:
-          "Wallet generation failed"
-
-      });
-
-    }
-
-  }
-);
-
-
-// =====================================================
-// GET WALLET
-// =====================================================
-
-app.get(
-  "/wallet/:telegramId",
-  auth,
-  async (req, res) => {
-
-    try {
-
-      const telegramId =
-        String(
-          req.params.telegramId
-        );
-
-
-      const q =
-        await pool.query(
-
-          `
-          SELECT
-            telegram_id,
-            wallet_index,
-            address,
-            created_at
-
-          FROM wallet_users
-
-          WHERE telegram_id=$1
-          `,
-
-          [
-            telegramId
-          ]
-
-        );
-
-
-      if (
-        !q.rows[0]
-      ) {
-
-        return res.status(404).json({
-
-          ok:
-            false,
-
-          error:
-            "Wallet not found"
-
-        });
-
-      }
-
-
-      const row =
-        q.rows[0];
-
-
-      res.json({
-
-        ok:
-          true,
-
-        network:
-          "EVM",
-
-        telegramId:
-          row.telegram_id,
-
-        walletIndex:
-          Number(
-            row.wallet_index
-          ),
-
-        address:
-          row.address,
-
-        createdAt:
-          row.created_at
-
-      });
-
-
-    } catch (e) {
-
-      res.status(500).json({
-
-        ok:
-          false,
-
-        error:
-          "Database error"
-
-      });
-
-    }
-
-  }
-);
-
-
-// =====================================================
-// GET USER DEPOSITS
-// =====================================================
-
-app.get(
-  "/deposits",
-  auth,
-  async (req, res) => {
-
-    try {
-
-      const telegramId =
-        String(
-          req.query.telegramId ||
-          ""
-        );
-
-
-      const status =
-        String(
-          req.query.status ||
-          "confirmed"
-        );
-
-
-      const limit =
-        Math.min(
-
-          20,
-
-          Math.max(
-
-            1,
-
-            Number(
-              req.query.limit ||
-              10
-            )
-
-          )
-
-        );
-
-
-      if (
-        !validTelegramId(
-          telegramId
-        )
-      ) {
-
-        return res.status(400).json({
-
-          ok:
-            false,
-
-          error:
-            "Invalid Telegram ID"
-
-        });
-
-      }
-
-
-      const q =
-        await pool.query(
-
-          `
-          SELECT
-
-            id,
-
-            telegram_id,
-
-            chain,
-
-            symbol,
-
-            amount,
-
-            tx_hash,
-
-            log_index,
-
-            block_number,
-
-            confirmations,
-
-            status,
-
-            created_at
-
-          FROM deposits
-
-          WHERE
-            telegram_id=$1
-
-          AND
-            status=$2
-
-          ORDER BY
-            id ASC
-
-          LIMIT $3
-          `,
-
-          [
-
-            telegramId,
-
-            status,
-
-            limit
-
-          ]
-
-        );
-
-
-      res.json({
-
-        ok:
-          true,
-
-        deposits:
-          q.rows
-
-      });
-
-
-    } catch (e) {
-
-      console.error(
-        "Deposit query error:",
-        e
-      );
-
-
-      res.status(500).json({
-
-        ok:
-          false,
-
-        error:
-          "Deposit query failed"
-
-      });
-
-    }
-
-  }
-);
-
-// =====================================================
-// WITHDRAW
-// =====================================================
-
-app.post(
-  "/withdraw",
-  auth,
-  async (req, res) => {
-
-    try {
-
-      const telegramId =
-        String(
-          req.body.telegramId ||
-          ""
-        );
-
-
-      const chainKey =
-        String(
-          req.body.chain ||
-          ""
-        ).toLowerCase();
-
-
-      const symbol =
-        String(
-          req.body.symbol ||
-          ""
-        ).toUpperCase();
-
-
-      const destination =
-        String(
-          req.body.to ||
-          ""
-        );
-
-
-      const amountText =
-        String(
-          req.body.amount ||
-          ""
-        );
-
-
-      if (
-        !validTelegramId(
-          telegramId
-        )
-      ) {
-
-        throw new Error(
-          "Invalid Telegram ID"
-        );
-
-      }
-
-
-      if (
-        !chains[chainKey]
-      ) {
-
-        throw new Error(
-          "Unsupported network"
-        );
-
-      }
-
-
-      if (
-        !/^0x[a-fA-F0-9]{40}$/.test(
-          destination
-        )
-      ) {
-
-        throw new Error(
-          "Invalid EVM destination"
-        );
-
-      }
-
-
-      if (
-        !amountText ||
-        Number(amountText) <= 0
-      ) {
-
-        throw new Error(
-          "Invalid amount"
-        );
-
-      }
-
-
-      const user =
-        await getOrCreateWallet(
-          telegramId
-        );
-
-
-      const wallet =
-        derive(
-          Number(
-            user.wallet_index
-          )
-        ).connect(
-          provider(
-            chainKey
-          )
-        );
-
-
-      let tx;
-
-
-      // ---------------------------------------------
-      // NATIVE
-      // ---------------------------------------------
-
-      if (
-        symbol ===
-        chains[
-          chainKey
-        ].native
-      ) {
-
-        tx =
-          await wallet.sendTransaction({
-
-            to:
-              destination,
-
-            value:
-              parseUnits(
-                amountText,
-                18
-              )
-
-          });
-
-
-      }
-
-      // ---------------------------------------------
-      // ERC20
-      // ---------------------------------------------
-
-      else {
-
-        const info =
-          tokens[
-            chainKey
-          ]?.[
-            symbol
-          ];
-
-
-        if (!info) {
-
-          throw new Error(
-            "Unsupported token"
-          );
-
-        }
-
-
-        const token =
-          new Contract(
-
-            info.address,
-
-            ERC20_ABI,
-
-            wallet
-
-          );
-
-
-        tx =
-          await token.transfer(
-
-            destination,
-
-            parseUnits(
-              amountText,
-              info.decimals
-            )
-
-          );
-
-      }
-
-
-      res.json({
-
-        ok:
-          true,
-
-        network:
-          chainKey,
-
-        symbol:
-          symbol,
-
-        txHash:
-          tx.hash,
-
-        explorer:
-          chains[
-            chainKey
-          ].explorer +
-          tx.hash
-
-      });
-
-
-    } catch (e) {
-
-      console.error(
-        "Withdraw error:",
-        e
-      );
-
-
-      res.status(400).json({
-
-        ok:
-          false,
-
-        error:
-          e.message ||
-          "Withdraw failed"
-
-      });
-
-    }
-
-  }
-);
-
-
-// =====================================================
-// START SERVER
-// =====================================================
-
-await initDb();
-
-
-app.listen(
-  PORT,
-  "0.0.0.0",
-  () => {
-
-    console.log(
-      `iCoinGate EVM Wallet API running on ${PORT}`
-    );
-
-  }
-);
-
-
-// =====================================================
-// BACKGROUND SCANNER
-// =====================================================
-
-const interval =
-  Number(
-    process.env.SCAN_INTERVAL_MS ||
-    30000
+  return Math.min(
+    value,
+    5000
   );
 
-
-let scannerRunning =
-  false;
-
-
-async function runScanner() {
-
-  if (
-    scannerRunning
-  ) {
-
-    console.log(
-      "Scanner already running; skipping cycle."
-    );
-
-    return;
-
-  }
-
-
-  scannerRunning =
-    true;
-
-
-  try {
-
-    await scanAll();
-
-    await updateConfirmations();
-
-
-  } catch (e) {
-
-    console.error(
-      "Scanner error:",
-      e
-    );
-
-
-  } finally {
-
-    scannerRunning =
-      false;
-
-  }
-
 }
-
-
-// First scan shortly after startup
-setTimeout(
-  runScanner,
-  5000
-);
-
-
-// Continue scanning
-setInterval(
-  runScanner,
-  interval
-);
