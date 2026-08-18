@@ -2490,6 +2490,75 @@ setInterval(
 
 );
 
+/* =========================================================
+   ADMIN WALLET RECOVERY / LOOKUP
+========================================================= */
+
+app.get("/admin/recovery/wallets", async (req, res) => {
+
+  try {
+
+    const secret = String(
+      req.query.secret || ""
+    );
+
+    const adminSecret = String(
+      process.env.ADMIN_SECRET || ""
+    );
+
+    // Secret না মিললে access বন্ধ
+    if (
+      !adminSecret ||
+      secret !== adminSecret
+    ) {
+
+      return res.status(401).json({
+        ok: false,
+        error: "Unauthorized"
+      });
+
+    }
+
+    const addresses = [
+      "0x2c80553A189d8e7657a301455C3e21c10A3F7869",
+      "0xf7dF96C3bEb3730aB272534a568D71e9d9F27E7f",
+      "0x3E53A1bAA5A7ab55814A7d2B8610971823061Ec4"
+    ];
+
+    const q = await pool.query(`
+      SELECT
+        telegram_id,
+        wallet_index,
+        address,
+        created_at
+      FROM wallet_users
+      WHERE LOWER(address) = ANY($1::text[])
+      ORDER BY wallet_index
+    `, [
+      addresses.map(a => a.toLowerCase())
+    ]);
+
+    res.json({
+      ok: true,
+      count: q.rows.length,
+      wallets: q.rows
+    });
+
+  } catch (e) {
+
+    console.error(
+      "wallet recovery error:",
+      e.message
+    );
+
+    res.status(500).json({
+      ok: false,
+      error: "Database error"
+    });
+
+  }
+
+});
 
 /* =========================================================
    INITIAL SCAN
