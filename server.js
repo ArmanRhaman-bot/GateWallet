@@ -1611,42 +1611,219 @@ app.get(
 
 
 /* =========================================================
-   MANUAL USDT SWEEP
+   SWEEP USDT - BSC
+   Auto detects USDT and sends to CENTRAL WALLET
 ========================================================= */
 
-app.post(
-  "/sweep-usdt",
-  auth,
-  async (req, res) => {
+app.post("/sweep-usdt", auth, async (req, res) => {
+  try {
 
-    try {
+    /* ---------- CONFIG ---------- */
 
-      await sweepAllUSDT();
+    const chainKey = "bsc";
+    const symbol = "USDT";
 
-      res.json({
+    const destination =
+      process.env.CENTRAL_WALLET_ADDRESS;
 
-        ok: true,
+    const minBalance =
+      Number(process.env.SWEEP_MIN_USDT || "0.01");
 
-        message:
-          "USDT sweep completed"
+    if (!destination ||
+        !/^0x[a-fA-F0-9]{40}$/.test(destination)) {
 
-      });
-
-    } catch (e) {
-
-      res.status(500).json({
-
+      return res.status(500).json({
         ok: false,
-
-        error:
-          e.message
-
+        error: "CENTRAL_WALLET_ADDRESS is not configured"
       });
-
     }
 
+    /* ---------- USERS ---------- */
+
+    const users = await pool.query(`
+      SELECT
+        telegram_id,
+        wallet_index,
+        address
+      FROM wallet_users
+      ORDER BY wallet_index ASC
+    `);
+
+    if (!users.rows.length) {
+      return res.json({
+        ok: true,
+        swept: 0,
+        message: "No users found",
+        results: []
+      });
+    }
+
+    /* ---------- TOKEN ---------- */
+
+    const info =
+      tokens[chainKey]?.[symbol];
+
+    if (!info) {
+      return res.status(400).json({
+        ok: false,
+        error: "BSC USDT token configuration not found"
+      });
+    }
+
+    const p = provider(chainKey);
+
+    const tokenContract =
+      new Contract(
+        info.address,
+        ERC20_ABI,
+        p
+      );
+
+    const results = [];
+
+    let totalSwept = 0;
+
+    /* ---------- SCAN ---------- */
+
+    for (const user of users.rows) {
+
+      try {
+
+        const wallet =
+          derive(
+            Number(user.wallet_index)
+          ).connect(p);
+
+        const actualAddress =
+          await wallet.getAddress();
+
+        /* Check USDT */
+
+        const balance =
+          await tokenContract.balanceOf(
+            actualAddress
+          );
+
+        const formattedBalance =
+          Number(
+            formatUnits(
+              balance,
+              info.decimals
+            )
+          );
+
+        if (
+          formattedBalance < minBalance
+        ) {
+
+          results.push({
+            telegramId: user.telegram_id,
+            address: actualAddress,
+            usdt: formattedBalance,
+            action: "skipped"
+          });
+
+          continue;
+        }
+
+        /* ---------- CHECK BNB ---------- */
+
+        const bnbBalance =
+          await p.getBalance(
+            actualAddress
+          );
+
+        /*
+         * Minimum BNB required for USDT transfer.
+         * ~0.0002 BNB gives reasonable gas reserve.
+         */
+
+        const minGas =
+          parseEther("0.0002");
+
+        if (
+          bnbBalance < minGas
+        ) {
+
+          results.push({
+            telegramId: user.telegram_id,
+            address: actualAddress,
+            usdt: formattedBalance,
+            bnb:
+              formatEther(bnbBalance),
+            action: "needs_gas"
+          });
+
+          continue;
+        }
+
+        /* ---------- SEND USDT ---------- */
+
+        const tx =
+          await tokenContract
+            .connect(wallet)
+            .transfer(
+              destination,
+              balance
+            );
+
+        results.push({
+          telegramId: user.telegram_id,
+          address: actualAddress,
+          usdt: formattedBalance,
+          txHash: tx.hash,
+          action: "swept"
+        });
+
+        totalSwept +=
+          formattedBalance;
+
+        await new Promise(
+          resolve =>
+            setTimeout(resolve, 2000)
+        );
+
+      } catch (e) {
+
+        console.error(
+          "Sweep error:",
+          user.telegram_id,
+          e.message
+        );
+
+        results.push({
+          telegramId: user.telegram_id,
+          address: user.address,
+          action: "failed",
+          error: e.message
+        });
+      }
+    }
+
+    /* ---------- RESPONSE ---------- */
+
+    return res.json({
+      ok: true,
+      chain: chainKey,
+      symbol,
+      destination,
+      totalSwept,
+      results
+    });
+
+  } catch (e) {
+
+    console.error(
+      "Sweep USDT error:",
+      e
+    );
+
+    return res.status(500).json({
+      ok: false,
+      error: e.message
+    });
   }
-);
+});
 
 
 /* =========================================================
