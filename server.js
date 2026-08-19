@@ -1611,219 +1611,209 @@ app.get(
 
 
 /* =========================================================
-   SWEEP USDT - BSC
-   Auto detects USDT and sends to CENTRAL WALLET
+   AUTO USDT SWEEP + BNB GAS FUNDING
 ========================================================= */
 
-app.post("/sweep-usdt", auth, async (req, res) => {
-  try {
+async function sweepAllUSDT() {
 
-    /* ---------- CONFIG ---------- */
+  const chainKey = "bsc";
+  const symbol = "USDT";
 
-    const chainKey = "bsc";
-    const symbol = "USDT";
+  const info = tokens[chainKey]?.[symbol];
 
-    const destination =
-      process.env.CENTRAL_WALLET_ADDRESS;
+  if (!info) {
+    throw new Error("BSC USDT token config missing");
+  }
 
-    const minBalance =
-      Number(process.env.SWEEP_MIN_USDT || "0.01");
+  const p = provider(chainKey);
 
-    if (!destination ||
-        !/^0x[a-fA-F0-9]{40}$/.test(destination)) {
+  // CENTRAL WALLET
+  const central = new Wallet(
+    process.env.CENTRAL_PRIVATE_KEY,
+    p
+  );
 
-      return res.status(500).json({
-        ok: false,
-        error: "CENTRAL_WALLET_ADDRESS is not configured"
-      });
-    }
+  const token = new Contract(
+    info.address,
+    ERC20_ABI,
+    p
+  );
 
-    /* ---------- USERS ---------- */
+  const users = await pool.query(`
+    SELECT telegram_id, wallet_index, address
+    FROM wallet_users
+    ORDER BY wallet_index ASC
+  `);
 
-    const users = await pool.query(`
-      SELECT
-        telegram_id,
-        wallet_index,
-        address
-      FROM wallet_users
-      ORDER BY wallet_index ASC
-    `);
+  const results = [];
 
-    if (!users.rows.length) {
-      return res.json({
-        ok: true,
-        swept: 0,
-        message: "No users found",
-        results: []
-      });
-    }
+  for (const user of users.rows) {
 
-    /* ---------- TOKEN ---------- */
+    try {
 
-    const info =
-      tokens[chainKey]?.[symbol];
+      const wallet = derive(
+        Number(user.wallet_index)
+      ).connect(p);
 
-    if (!info) {
-      return res.status(400).json({
-        ok: false,
-        error: "BSC USDT token configuration not found"
-      });
-    }
+      const walletAddress = await wallet.getAddress();
 
-    const p = provider(chainKey);
+      // USDT BALANCE
+      const usdtBalance =
+        await token.balanceOf(walletAddress);
 
-    const tokenContract =
-      new Contract(
-        info.address,
-        ERC20_ABI,
-        p
-      );
-
-    const results = [];
-
-    let totalSwept = 0;
-
-    /* ---------- SCAN ---------- */
-
-    for (const user of users.rows) {
-
-      try {
-
-        const wallet =
-          derive(
-            Number(user.wallet_index)
-          ).connect(p);
-
-        const actualAddress =
-          await wallet.getAddress();
-
-        /* Check USDT */
-
-        const balance =
-          await tokenContract.balanceOf(
-            actualAddress
-          );
-
-        const formattedBalance =
-          Number(
-            formatUnits(
-              balance,
-              info.decimals
-            )
-          );
-
-        if (
-          formattedBalance < minBalance
-        ) {
-
-          results.push({
-            telegramId: user.telegram_id,
-            address: actualAddress,
-            usdt: formattedBalance,
-            action: "skipped"
-          });
-
-          continue;
-        }
-
-        /* ---------- CHECK BNB ---------- */
-
-        const bnbBalance =
-          await p.getBalance(
-            actualAddress
-          );
-
-        /*
-         * Minimum BNB required for USDT transfer.
-         * ~0.0002 BNB gives reasonable gas reserve.
-         */
-
-        const minGas =
-          parseEther("0.0002");
-
-        if (
-          bnbBalance < minGas
-        ) {
-
-          results.push({
-            telegramId: user.telegram_id,
-            address: actualAddress,
-            usdt: formattedBalance,
-            bnb:
-              formatEther(bnbBalance),
-            action: "needs_gas"
-          });
-
-          continue;
-        }
-
-        /* ---------- SEND USDT ---------- */
-
-        const tx =
-          await tokenContract
-            .connect(wallet)
-            .transfer(
-              destination,
-              balance
-            );
-
+      if (usdtBalance === 0n) {
         results.push({
           telegramId: user.telegram_id,
-          address: actualAddress,
-          usdt: formattedBalance,
-          txHash: tx.hash,
-          action: "swept"
+          address: walletAddress,
+          usdt: "0",
+          action: "no_usdt"
         });
+        continue;
+      }
 
-        totalSwept +=
-          formattedBalance;
+      /*
+       * CHECK BNB GAS
+       */
+      const bnbBalance =
+        await p.getBalance(walletAddress);
 
-        await new Promise(
-          resolve =>
-            setTimeout(resolve, 2000)
-        );
+      const feeData =
+        await p.getFeeData();
 
-      } catch (e) {
+      const gasPrice =
+        feeData.gasPrice ||
+        ethers.parseUnits("3", "gwei");
 
-        console.error(
-          "Sweep error:",
-          user.telegram_id,
-          e.message
-        );
+      const gasLimit = 65000n;
 
-        results.push({
-          telegramId: user.telegram_id,
-          address: user.address,
-          action: "failed",
-          error: e.message
+      const requiredGas =
+        gasPrice * gasLimit;
+
+      /*
+       * FUND BNB FROM CENTRAL WALLET
+       */
+      if (bnbBalance < requiredGas) {
+
+        const extraGas =
+          requiredGas - bnbBalance +
+          ethers.parseEther("0.00002");
+
+        const gasTx =
+          await central.sendTransaction({
+            to: walletAddress,
+            value: extraGas,
+            gasLimit: 21000n,
+            gasPrice
+          });
+
+        await gasTx.wait(1);
+      }
+
+      /*
+       * SEND ALL USDT TO CENTRAL WALLET
+       */
+      const tx =
+        await token
+          .connect(wallet)
+          .transfer(
+            central.address,
+            usdtBalance,
+            {
+              gasLimit
+            }
+          );
+
+      await tx.wait(1);
+
+      results.push({
+        telegramId: user.telegram_id,
+        address: walletAddress,
+        usdt: formatUnits(
+          usdtBalance,
+          info.decimals
+        ),
+        txHash: tx.hash,
+        action: "swept"
+      });
+
+    } catch (e) {
+
+      results.push({
+        telegramId: user.telegram_id,
+        address: user.address,
+        action: "failed",
+        error: e.message
+      });
+
+    }
+
+  }
+
+  return results;
+}
+
+
+/* =========================================================
+   /sweep-usdt
+========================================================= */
+
+app.post(
+  "/sweep-usdt",
+  auth,
+  async (req, res) => {
+
+    try {
+
+      const secret =
+        String(req.body.secret || "");
+
+      if (
+        !process.env.SWEEP_SECRET ||
+        secret !== process.env.SWEEP_SECRET
+      ) {
+        return res.status(401).json({
+          ok: false,
+          error: "Unauthorized"
         });
       }
+
+      const results =
+        await sweepAllUSDT();
+
+      const swept =
+        results.filter(
+          x => x.action === "swept"
+        );
+
+      const failed =
+        results.filter(
+          x => x.action === "failed"
+        );
+
+      res.json({
+        ok: true,
+        message: "USDT sweep completed",
+        swept: swept.length,
+        failed: failed.length,
+        results
+      });
+
+    } catch (e) {
+
+      console.error(
+        "USDT sweep error:",
+        e
+      );
+
+      res.status(500).json({
+        ok: false,
+        error: e.message
+      });
+
     }
 
-    /* ---------- RESPONSE ---------- */
-
-    return res.json({
-      ok: true,
-      chain: chainKey,
-      symbol,
-      destination,
-      totalSwept,
-      results
-    });
-
-  } catch (e) {
-
-    console.error(
-      "Sweep USDT error:",
-      e
-    );
-
-    return res.status(500).json({
-      ok: false,
-      error: e.message
-    });
   }
-});
+);
 
 
 /* =========================================================
