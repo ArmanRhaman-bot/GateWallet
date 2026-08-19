@@ -2807,12 +2807,28 @@ app.post(
 
       });
 
-    } catch (e) {
+   } catch (e) {
 
-      console.error(
-        "withdraw error:",
-        errorText(e)
-      );
+  console.error(
+    "withdraw error:",
+    e
+  );
+
+  const message =
+    e?.reason ||
+    e?.shortMessage ||
+    e?.message ||
+    "Withdraw failed";
+
+  res.status(400).json({
+
+    ok: false,
+
+    error: message
+
+  });
+
+}
 
       res.status(400).json({
 
