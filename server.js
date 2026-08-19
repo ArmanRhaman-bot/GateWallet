@@ -42,66 +42,42 @@ const pool = new Pool({
     : { rejectUnauthorized: false }
 });
 
+/* =========================================================
+   BSC RPC
+========================================================= */
+
 const chains = {
   bsc: {
-    name: "BSC",
     rpc:
       process.env.BSC_RPC_URL ||
-      "https://bsc-dataseed.binance.org",
-    chainId: 56,
-    native: "BNB",
-    explorer: "https://bscscan.com/tx/"
+      "https://bsc-dataseed.binance.org"
   },
 
   eth: {
-    name: "Ethereum",
     rpc:
       process.env.ETH_RPC_URL ||
-      "https://cloudflare-eth.com",
-    chainId: 1,
-    native: "ETH",
-    explorer: "https://etherscan.io/tx/"
+      "https://ethereum-rpc.publicnode.com"
   }
 };
+
+/* =========================================================
+   FIX: BSC / ETH USDT TOKEN CONFIG
+========================================================= */
 
 const tokens = {
   bsc: {
     USDT: {
-      address:
-        "0x55d398326f99059f775485246999027b3197955",
-      decimals: 18
-    },
-
-    USDC: {
-      address:
-        "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
-      decimals: 18
-    },
-
-    BUSD: {
-      address:
-        "0xe9e7cea3dedca5984780bafc599bd69add087d56",
+      // Binance-Peg USDT (BEP20)
+      address: "0x55d398326f99059fF775485246999027B3197955",
       decimals: 18
     }
   },
 
   eth: {
     USDT: {
-      address:
-        "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      // Ethereum USDT (ERC20)
+      address: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
       decimals: 6
-    },
-
-    USDC: {
-      address:
-        "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-      decimals: 6
-    },
-
-    BUSD: {
-      address:
-        "0x4fabb145d64652a948d72533023f6e7a623c7c53",
-      decimals: 18
     }
   }
 };
