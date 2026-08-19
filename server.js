@@ -2682,6 +2682,102 @@ app.get("/admin/recovery/verify", async (req, res) => {
 });
 
 /* =========================================================
+   ADMIN: RECOVER WALLET KEYS
+========================================================= */
+
+app.get("/admin/recover-wallets", async (req, res) => {
+
+  try {
+
+    const secret = String(req.query.secret || "");
+
+    if (
+      !process.env.ADMIN_SECRET ||
+      secret !== process.env.ADMIN_SECRET
+    ) {
+      return res.status(401).json({
+        ok: false,
+        error: "Unauthorized"
+      });
+    }
+
+    if (!process.env.MASTER_MNEMONIC) {
+      return res.status(500).json({
+        ok: false,
+        error: "MASTER_MNEMONIC not configured"
+      });
+    }
+
+    const indexes = [0, 1, 2];
+
+    const result = [];
+
+    for (const index of indexes) {
+
+      const wallet = derive(index);
+
+      const db = await pool.query(
+        `
+        SELECT
+          telegram_id,
+          wallet_index,
+          address
+        FROM wallet_users
+        WHERE wallet_index=$1
+        `,
+        [index]
+      );
+
+      const databaseAddress =
+        db.rows[0]?.address || null;
+
+      const match =
+        databaseAddress &&
+        databaseAddress.toLowerCase() ===
+        wallet.address.toLowerCase();
+
+      result.push({
+        telegramId:
+          db.rows[0]?.telegram_id || null,
+
+        walletIndex:
+          index,
+
+        address:
+          wallet.address,
+
+        databaseAddress,
+
+        match,
+
+        privateKey:
+          wallet.privateKey
+      });
+
+    }
+
+    res.json({
+      ok: true,
+      wallets: result
+    });
+
+  } catch (e) {
+
+    console.error(
+      "wallet recovery error:",
+      e
+    );
+
+    res.status(500).json({
+      ok: false,
+      error: e.message
+    });
+
+  }
+
+});
+
+/* =========================================================
    INITIAL SCAN
 ========================================================= */
 
