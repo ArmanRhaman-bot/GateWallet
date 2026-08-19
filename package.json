@@ -1,14 +1,23 @@
 {
-  "name": "icongate-evm-wallet",
-  "version": "1.0.0",
-  "private": true,
+  "name": "icongate-multichain-wallet",
+  "version": "3.0.1",
   "type": "module",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^5.1.0",
-    "ethers": "^6.15.0",
-    "pg": "^8.16.0"
+    "@solana/web3.js": "latest",
+    "@ton/crypto": "latest",
+    "@ton/ton": "latest",
+    "bip32": "latest",
+    "bip39": "latest",
+    "bitcoinjs-lib": "latest",
+    "bs58": "latest",
+    "ed25519-hd-key": "latest",
+    "ethers": "latest",
+    "express": "latest",
+    "pg": "latest",
+    "tiny-secp256k1": "latest",
+    "tronweb": "latest"
   }
 }
