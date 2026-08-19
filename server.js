@@ -6,31 +6,43 @@ import {
   Contract,
   parseUnits,
   formatUnits,
-  Wallet,
-  Interface
+  isAddress
 } from "ethers";
 import pg from "pg";
 
 const { Pool } = pg;
 const app = express();
+app.use(express.json({ limit: "64kb" }));
 
-app.use(express.json({ limit: "32kb" }));
+const PORT = Number(process.env.PORT || 3000);
+const API_KEY = String(process.env.BOT_API_KEY || "");
+const MASTER_MNEMONIC = String(process.env.MASTER_MNEMONIC || "");
+const DATABASE_URL = String(process.env.DATABASE_URL || "");
 
-const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.BOT_API_KEY;
-const MASTER_MNEMONIC = process.env.MASTER_MNEMONIC;
-const DATABASE_URL = process.env.DATABASE_URL;
-const CENTRAL_WALLET_PRIVATE_KEY =
-  process.env.CENTRAL_WALLET_PRIVATE_KEY;
+const CENTRAL_WALLET_INDEX =
+  Number(process.env.CENTRAL_WALLET_INDEX || 999999);
 
-if (
-  !API_KEY ||
-  !MASTER_MNEMONIC ||
-  !DATABASE_URL ||
-  !CENTRAL_WALLET_PRIVATE_KEY
-) {
+const CONFIRMATIONS =
+  Number(process.env.CONFIRMATIONS || 3);
+
+const SCAN_INTERVAL_MS =
+  Number(process.env.SCAN_INTERVAL_MS || 30000);
+
+const SCAN_BLOCKS =
+  Number(process.env.SCAN_BLOCKS || 100);
+
+const LOG_CHUNK =
+  Number(process.env.LOG_CHUNK || 500);
+
+const SWEEP_MIN_USDT =
+  String(process.env.SWEEP_MIN_USDT || "0.000001");
+
+const SWEEP_GAS_MULTIPLIER =
+  Number(process.env.SWEEP_GAS_MULTIPLIER || 2);
+
+if (!API_KEY || !MASTER_MNEMONIC || !DATABASE_URL) {
   console.error(
-    "Missing required environment variables"
+    "Missing BOT_API_KEY, MASTER_MNEMONIC or DATABASE_URL"
   );
   process.exit(1);
 }
@@ -39,59 +51,113 @@ const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: DATABASE_URL.includes("localhost")
     ? false
-    : { rejectUnauthorized: false }
+    : { rejectUnauthorized: false },
+  max: 5
 });
 
-/* =========================================================
-   BSC RPC
-========================================================= */
-
 const chains = {
+
   bsc: {
-    rpc:
+    name: "BSC",
+    chainId: 56,
+    native: "BNB",
+    explorer: "https://bscscan.com/tx/",
+
+    rpcs: (
+      process.env.BSC_RPC_URLS ||
       process.env.BSC_RPC_URL ||
       "https://bsc-dataseed.binance.org"
+    )
+      .split(",")
+      .map(x => x.trim())
+      .filter(Boolean),
+
+    centralAddress:
+      String(
+        process.env.CENTRAL_BSC_ADDRESS || ""
+      )
   },
 
   eth: {
-    rpc:
+    name: "Ethereum",
+    chainId: 1,
+    native: "ETH",
+    explorer: "https://etherscan.io/tx/",
+
+    rpcs: (
+      process.env.ETH_RPC_URLS ||
       process.env.ETH_RPC_URL ||
-      "https://ethereum-rpc.publicnode.com"
+      "https://cloudflare-eth.com"
+    )
+      .split(",")
+      .map(x => x.trim())
+      .filter(Boolean),
+
+    centralAddress:
+      String(
+        process.env.CENTRAL_ETH_ADDRESS || ""
+      )
   }
+
 };
 
-/* =========================================================
-   FIX: BSC / ETH USDT TOKEN CONFIG
-========================================================= */
-
 const tokens = {
+
   bsc: {
+
     USDT: {
-      // Binance-Peg USDT (BEP20)
-      address: "0x55d398326f99059fF775485246999027B3197955",
+      address:
+        "0x55d398326f99059f775485246999027b3197955",
+      decimals: 18
+    },
+
+    USDC: {
+      address:
+        "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+      decimals: 18
+    },
+
+    BUSD: {
+      address:
+        "0xe9e7cea3dedca5984780bafc599bd69add087d56",
       decimals: 18
     }
+
   },
 
   eth: {
+
     USDT: {
-      // Ethereum USDT (ERC20)
-      address: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      address:
+        "0xdAC17F958D2ee523a2206206994597C13D831ec7",
       decimals: 6
+    },
+
+    USDC: {
+      address:
+        "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      decimals: 6
+    },
+
+    BUSD: {
+      address:
+        "0x4fabb145d64652a948d72533023f6e7a623c7c53",
+      decimals: 18
     }
+
   }
+
 };
 
 const ERC20_ABI = [
+
   "event Transfer(address indexed from,address indexed to,uint256 value)",
 
   "function balanceOf(address) view returns (uint256)",
 
   "function transfer(address to,uint256 amount) returns (bool)"
-];
 
-const ERC20_INTERFACE =
-  new Interface(ERC20_ABI);
+];
 
 const mnemonic =
   Mnemonic.fromPhrase(
@@ -107,8 +173,7 @@ const master =
 function auth(req, res, next) {
 
   if (
-    req.get("x-api-key") !==
-    API_KEY
+    req.get("x-api-key") !== API_KEY
   ) {
 
     return res.status(401).json({
@@ -119,6 +184,7 @@ function auth(req, res, next) {
   }
 
   next();
+
 }
 
 function validTelegramId(v) {
@@ -137,7 +203,7 @@ function derive(index) {
 
 }
 
-function provider(chainKey) {
+function rpcList(chainKey) {
 
   const c =
     chains[chainKey];
@@ -148,162 +214,243 @@ function provider(chainKey) {
     );
   }
 
-  return new JsonRpcProvider(
-    c.rpc,
-    c.chainId
-  );
+  return c.rpcs;
 
 }
 
-function centralWallet(chainKey) {
-
-  return new Wallet(
-    CENTRAL_WALLET_PRIVATE_KEY,
-    provider(chainKey)
-  );
-
-}
-
-function normalizeAddress(address) {
-
-  return String(
-    address || ""
-  ).toLowerCase();
-
-}
-
-function getExplorerUrl(
-  chain,
-  txHash
+function provider(
+  chainKey,
+  rpc
 ) {
 
-  return (
-    chains[chain]?.explorer ||
-    ""
-  ) + txHash;
+  const c =
+    chains[chainKey];
+
+  return new JsonRpcProvider(
+    rpc || c.rpcs[0],
+    {
+      name:
+        c.name.toLowerCase(),
+      chainId:
+        c.chainId
+    },
+    {
+      staticNetwork: true
+    }
+  );
 
 }
 
-function getScanDepth() {
+async function getProvider(
+  chainKey
+) {
 
-  const n =
-    Number(
-      process.env.SCAN_BLOCKS || 100
-    );
+  let last;
 
-  if (
-    !Number.isFinite(n) ||
-    n <= 0
+  for (
+    const rpc of rpcList(chainKey)
   ) {
 
-    return 100;
+    try {
+
+      const p =
+        provider(
+          chainKey,
+          rpc
+        );
+
+      const network =
+        await p.getNetwork();
+
+      if (
+        Number(network.chainId) !==
+        chains[chainKey].chainId
+      ) {
+
+        throw new Error(
+          `Wrong chain returned by RPC: ${network.chainId}`
+        );
+
+      }
+
+      await p.getBlockNumber();
+
+      return p;
+
+    } catch (e) {
+
+      last = e;
+
+      console.error(
+        `[RPC ERROR] ${chainKey} ${rpc}: ${e.message}`
+      );
+
+    }
 
   }
 
-  return Math.min(
-    n,
-    5000
+  throw new Error(
+    `No working RPC for ${chainKey}: ${
+      last?.message || "unknown error"
+    }`
   );
 
 }
 
+async function withProvider(
+  chainKey,
+  fn
+) {
 
-/* =========================================================
-   DATABASE
-========================================================= */
+  let last;
+
+  for (
+    const rpc of rpcList(chainKey)
+  ) {
+
+    try {
+
+      const p =
+        provider(
+          chainKey,
+          rpc
+        );
+
+      const network =
+        await p.getNetwork();
+
+      if (
+        Number(network.chainId) !==
+        chains[chainKey].chainId
+      ) {
+
+        throw new Error(
+          "RPC returned wrong network"
+        );
+
+      }
+
+      return await fn(p);
+
+    } catch (e) {
+
+      last = e;
+
+      console.error(
+        `[RPC RETRY] ${chainKey} ${rpc}: ${e.message}`
+      );
+
+    }
+
+  }
+
+  throw (
+    last ||
+    new Error("RPC failed")
+  );
+
+}
 
 async function initDb() {
 
   await pool.query(`
 
     CREATE SEQUENCE IF NOT EXISTS
-      wallet_index_seq
-      START 0
-      MINVALUE 0;
+    wallet_index_seq
+    START 0
+    MINVALUE 0;
 
-    CREATE TABLE IF NOT EXISTS
-      wallet_users (
+    CREATE TABLE IF NOT EXISTS wallet_users (
 
       id BIGSERIAL PRIMARY KEY,
 
-      telegram_id TEXT
-        UNIQUE NOT NULL,
+      telegram_id
+      TEXT UNIQUE NOT NULL,
 
-      wallet_index BIGINT
-        UNIQUE NOT NULL,
+      wallet_index
+      BIGINT UNIQUE NOT NULL,
 
-      address TEXT
-        UNIQUE NOT NULL,
+      address
+      TEXT UNIQUE NOT NULL,
 
       created_at
-        TIMESTAMPTZ
-        NOT NULL
-        DEFAULT NOW()
+      TIMESTAMPTZ
+      NOT NULL
+      DEFAULT NOW()
+
     );
 
-    CREATE TABLE IF NOT EXISTS
-      deposits (
+    CREATE TABLE IF NOT EXISTS deposits (
 
       id BIGSERIAL PRIMARY KEY,
 
-      telegram_id TEXT NOT NULL,
+      telegram_id
+      TEXT NOT NULL,
 
-      chain TEXT NOT NULL,
+      chain
+      TEXT NOT NULL,
 
-      symbol TEXT NOT NULL,
+      symbol
+      TEXT NOT NULL,
 
       amount
-        NUMERIC(78,30)
-        NOT NULL,
+      NUMERIC(78,30)
+      NOT NULL,
 
-      tx_hash TEXT NOT NULL,
+      tx_hash
+      TEXT NOT NULL,
 
-      log_index INTEGER
-        NOT NULL DEFAULT 0,
+      log_index
+      INTEGER
+      NOT NULL
+      DEFAULT 0,
 
-      block_number BIGINT
-        NOT NULL,
+      block_number
+      BIGINT
+      NOT NULL,
 
-      confirmations INTEGER
-        NOT NULL DEFAULT 0,
+      confirmations
+      INTEGER
+      NOT NULL
+      DEFAULT 0,
 
-      status TEXT
-        NOT NULL DEFAULT 'pending',
+      status
+      TEXT
+      NOT NULL
+      DEFAULT 'pending',
 
       created_at
-        TIMESTAMPTZ
-        NOT NULL
-        DEFAULT NOW(),
+      TIMESTAMPTZ
+      NOT NULL
+      DEFAULT NOW(),
 
       UNIQUE(
         chain,
         tx_hash,
         log_index
       )
+
     );
 
     CREATE TABLE IF NOT EXISTS
-      native_snapshots (
+    native_snapshots (
 
-      snapshot_key TEXT PRIMARY KEY,
+      snapshot_key
+      TEXT PRIMARY KEY,
 
       amount
-        NUMERIC(78,0)
-        NOT NULL
+      NUMERIC(78,0)
+      NOT NULL
+
     );
 
     CREATE INDEX IF NOT EXISTS
-      deposits_status_idx
-      ON deposits(status,id);
+    deposits_status_idx
+    ON deposits(status,id);
 
   `);
 
 }
-
-
-/* =========================================================
-   WALLET
-========================================================= */
 
 async function getOrCreateWallet(
   telegramId
@@ -311,7 +458,6 @@ async function getOrCreateWallet(
 
   const old =
     await pool.query(
-
       `
       SELECT
         telegram_id,
@@ -323,12 +469,12 @@ async function getOrCreateWallet(
 
       WHERE telegram_id=$1
       `,
-
       [telegramId]
-
     );
 
-  if (old.rows[0]) {
+  if (
+    old.rows[0]
+  ) {
 
     return {
       ...old.rows[0],
@@ -346,70 +492,59 @@ async function getOrCreateWallet(
       "BEGIN"
     );
 
-    const again =
-      await client.query(
-
-        `
-        SELECT
-          telegram_id,
-          wallet_index,
-          address,
-          created_at
-
-        FROM wallet_users
-
-        WHERE telegram_id=$1
-
-        FOR UPDATE
-        `,
-
-        [telegramId]
-
-      );
-
-    if (again.rows[0]) {
-
-      await client.query(
-        "COMMIT"
-      );
-
-      return {
-        ...again.rows[0],
-        existing: true
-      };
-
-    }
-
     const seq =
       await client.query(
         `
-        SELECT nextval(
-          'wallet_index_seq'
-        ) AS n
+        SELECT
+          nextval(
+            'wallet_index_seq'
+          ) AS n
         `
       );
 
-    const index =
+    let index =
       Number(
         seq.rows[0].n
       );
+
+    if (
+      index ===
+      CENTRAL_WALLET_INDEX
+    ) {
+
+      index =
+        Number(
+          (
+            await client.query(
+              `
+              SELECT
+                nextval(
+                  'wallet_index_seq'
+                ) AS n
+              `
+            )
+          )
+          .rows[0]
+          .n
+        );
+
+    }
 
     const wallet =
       derive(index);
 
     const inserted =
       await client.query(
-
         `
-        INSERT INTO wallet_users(
+        INSERT INTO wallet_users
+        (
           telegram_id,
           wallet_index,
           address
         )
 
-        VALUES(
-          $1,$2,$3
-        )
+        VALUES
+        ($1,$2,$3)
 
         RETURNING
           telegram_id,
@@ -417,13 +552,11 @@ async function getOrCreateWallet(
           address,
           created_at
         `,
-
         [
           telegramId,
           index,
           wallet.address
         ]
-
       );
 
     await client.query(
@@ -461,11 +594,6 @@ async function getOrCreateWallet(
 
 }
 
-
-/* =========================================================
-   ERC20 SCANNER
-========================================================= */
-
 async function scanToken(
   chainKey,
   symbol,
@@ -474,205 +602,153 @@ async function scanToken(
   latestBlock
 ) {
 
-  const p =
-    provider(chainKey);
+  await withProvider(
+    chainKey,
+    async p => {
 
-  const depth =
-    getScanDepth();
-
-  const fromBlock =
-    Math.max(
-      0,
-      latestBlock - depth
-    );
-
-  const normalizedUser =
-    normalizeAddress(
-      userAddress
-    );
-
-  const transferTopic =
-    ERC20_INTERFACE
-      .getEvent(
-        "Transfer"
-      )
-      .topicHash;
-
-  const paddedAddress =
-    "0x" +
-    normalizedUser
-      .replace(/^0x/, "")
-      .padStart(64, "0");
-
-  let logs;
-
-  try {
-
-    logs =
-      await p.getLogs({
-
-        address:
+      const contract =
+        new Contract(
           info.address,
+          ERC20_ABI,
+          p
+        );
 
-        fromBlock,
-
-        toBlock:
-          latestBlock,
-
-        topics: [
-
-          transferTopic,
-
+      const filter =
+        contract.filters.Transfer(
           null,
-
-          paddedAddress
-
-        ]
-
-      });
-
-  } catch (e) {
-
-    console.error(
-      "ERC20 getLogs failed:",
-      chainKey,
-      symbol,
-      e.message
-    );
-
-    return;
-
-  }
-
-  for (
-    const log of logs
-  ) {
-
-    try {
-
-      const parsed =
-        ERC20_INTERFACE.parseLog({
-
-          topics:
-            log.topics,
-
-          data:
-            log.data
-
-        });
-
-      if (!parsed) {
-        continue;
-      }
-
-      const value =
-        parsed.args.value;
-
-      const amount =
-        formatUnits(
-          value,
-          info.decimals
-        );
-
-      if (
-        Number(amount) <= 0
-      ) {
-        continue;
-      }
-
-      const destination =
-        normalizeAddress(
-          parsed.args.to
-        );
-
-      if (
-        destination !==
-        normalizedUser
-      ) {
-        continue;
-      }
-
-      const txHash =
-        log.transactionHash;
-
-      const logIndex =
-        Number(
-          log.index ?? 0
-        );
-
-      const blockNumber =
-        Number(
-          log.blockNumber
-        );
-
-      await pool.query(
-
-        `
-        INSERT INTO deposits(
-          telegram_id,
-          chain,
-          symbol,
-          amount,
-          tx_hash,
-          log_index,
-          block_number,
-          confirmations,
-          status
-        )
-
-        SELECT
-          telegram_id,
-          $1,
-          $2,
-          $3,
-          $4,
-          $5,
-          $6,
-          0,
-          'pending'
-
-        FROM wallet_users
-
-        WHERE LOWER(address)
-          = LOWER($7)
-
-        ON CONFLICT(
-          chain,
-          tx_hash,
-          log_index
-        )
-
-        DO NOTHING
-        `,
-
-        [
-          chainKey,
-          symbol,
-          amount,
-          txHash,
-          logIndex,
-          blockNumber,
           userAddress
-        ]
+        );
 
-      );
+      const start =
+        Math.max(
+          0,
+          latestBlock - SCAN_BLOCKS
+        );
 
-    } catch (e) {
+      /*
+       * IMPORTANT:
+       * Small chunks prevent
+       * "limit exceeded".
+       */
 
-      console.error(
-        "Token processing:",
-        e.message
-      );
+      for (
+        let from = start;
+        from <= latestBlock;
+        from += LOG_CHUNK + 1
+      ) {
+
+        const to =
+          Math.min(
+            latestBlock,
+            from + LOG_CHUNK
+          );
+
+        let logs;
+
+        try {
+
+          logs =
+            await contract.queryFilter(
+              filter,
+              from,
+              to
+            );
+
+        } catch (e) {
+
+          console.error(
+            `[GETLOGS ERROR] ${chainKey} ${symbol} ${from}-${to}: ${e.message}`
+          );
+
+          continue;
+
+        }
+
+        for (
+          const log of logs
+        ) {
+
+          const value =
+            log.args?.[2];
+
+          if (
+            value === undefined
+          ) {
+            continue;
+          }
+
+          const txHash =
+            log.transactionHash;
+
+          const logIndex =
+            Number(
+              log.index ?? 0
+            );
+
+          await pool.query(
+            `
+            INSERT INTO deposits
+            (
+              telegram_id,
+              chain,
+              symbol,
+              amount,
+              tx_hash,
+              log_index,
+              block_number,
+              status
+            )
+
+            SELECT
+              telegram_id,
+              $1,
+              $2,
+              $3,
+              $4,
+              $5,
+              $6,
+              'pending'
+
+            FROM wallet_users
+
+            WHERE
+              LOWER(address)
+              =
+              LOWER($7)
+
+            ON CONFLICT
+            (
+              chain,
+              tx_hash,
+              log_index
+            )
+
+            DO NOTHING
+            `,
+            [
+              chainKey,
+              symbol,
+              formatUnits(
+                value,
+                info.decimals
+              ),
+              txHash,
+              logIndex,
+              Number(
+                log.blockNumber
+              ),
+              userAddress
+            ]
+          );
+
+        }
+
+      }
 
     }
-
-  }
+  );
 
 }
-
-/* =========================================================
-   NATIVE SCANNER
-========================================================= */
 
 async function scanNative(
   chainKey,
@@ -680,214 +756,205 @@ async function scanNative(
   latestBlock
 ) {
 
-  const p =
-    provider(chainKey);
+  await withProvider(
+    chainKey,
+    async p => {
 
-  let current;
+      const current =
+        (
+          await p.getBalance(
+            user.address
+          )
+        ).toString();
 
-  try {
+      const key =
+        `native:${chainKey}:${user.address.toLowerCase()}`;
 
-    current =
-      (
-        await p.getBalance(
-          user.address
-        )
-      ).toString();
+      const old =
+        await pool.query(
+          `
+          SELECT amount
+          FROM native_snapshots
+          WHERE snapshot_key=$1
+          `,
+          [key]
+        );
 
-  } catch (e) {
+      if (
+        !old.rows[0]
+      ) {
 
-    return;
+        await pool.query(
+          `
+          INSERT INTO
+          native_snapshots
+          (
+            snapshot_key,
+            amount
+          )
 
-  }
+          VALUES
+          ($1,$2)
 
-  const key =
-    `native:${chainKey}:${user.address.toLowerCase()}`;
+          ON CONFLICT
+          (snapshot_key)
 
-  const old =
-    await pool.query(
+          DO UPDATE SET
+          amount =
+          EXCLUDED.amount
+          `,
+          [
+            key,
+            current
+          ]
+        );
 
-      `
-      SELECT amount
-      FROM native_snapshots
-      WHERE snapshot_key=$1
-      `,
+        return;
 
-      [key]
+      }
 
-    );
+      const delta =
+        BigInt(current) -
+        BigInt(
+          old.rows[0].amount
+        );
 
-  if (!old.rows[0]) {
+      if (
+        delta > 0n
+      ) {
 
-    await pool.query(
+        const synthetic =
+          `native:${chainKey}:${user.address}:${current}`;
 
-      `
-      INSERT INTO native_snapshots(
-        snapshot_key,
-        amount
-      )
+        await pool.query(
+          `
+          INSERT INTO deposits
+          (
+            telegram_id,
+            chain,
+            symbol,
+            amount,
+            tx_hash,
+            log_index,
+            block_number,
+            status
+          )
 
-      VALUES($1,$2)
+          VALUES
+          (
+            $1,$2,$3,$4,$5,
+            -1,$6,'pending'
+          )
 
-      ON CONFLICT(snapshot_key)
+          ON CONFLICT
+          (
+            chain,
+            tx_hash,
+            log_index
+          )
 
-      DO UPDATE SET
-        amount=EXCLUDED.amount
-      `,
+          DO NOTHING
+          `,
+          [
+            user.telegram_id,
+            chainKey,
+            chains[chainKey].native,
+            formatUnits(
+              delta,
+              18
+            ),
+            synthetic,
+            latestBlock
+          ]
+        );
 
-      [
-        key,
-        current
-      ]
+      }
 
-    );
+      await pool.query(
+        `
+        UPDATE native_snapshots
 
-    return;
+        SET amount=$2
 
-  }
-
-  const delta =
-    BigInt(current) -
-    BigInt(
-      old.rows[0].amount
-    );
-
-  if (delta > 0n) {
-
-    const amount =
-      formatUnits(
-        delta,
-        18
+        WHERE snapshot_key=$1
+        `,
+        [
+          key,
+          current
+        ]
       );
 
-    const synthetic =
-      `native:${chainKey}:${user.address}:${current}`;
-
-    await pool.query(
-
-      `
-      INSERT INTO deposits(
-        telegram_id,
-        chain,
-        symbol,
-        amount,
-        tx_hash,
-        log_index,
-        block_number,
-        confirmations,
-        status
-      )
-
-      VALUES(
-        $1,$2,$3,$4,$5,-1,$6,0,'pending'
-      )
-
-      ON CONFLICT(
-        chain,
-        tx_hash,
-        log_index
-      )
-
-      DO NOTHING
-      `,
-
-      [
-        user.telegram_id,
-        chainKey,
-        chains[chainKey].native,
-        amount,
-        synthetic,
-        latestBlock
-      ]
-
-    );
-
-  }
-
-  await pool.query(
-
-    `
-    UPDATE native_snapshots
-
-    SET amount=$2
-
-    WHERE snapshot_key=$1
-    `,
-
-    [
-      key,
-      current
-    ]
-
+    }
   );
 
 }
-
-
-/* =========================================================
-   SCAN ALL
-========================================================= */
 
 async function scanAll() {
 
   const users =
     await pool.query(
-
       `
       SELECT
         telegram_id,
-        wallet_index,
         address
 
       FROM wallet_users
 
-      ORDER BY id ASC
+      ORDER BY wallet_index ASC
       `
-
     );
 
   for (
-    const [chainKey]
-      of Object.entries(chains)
+    const chainKey
+    of Object.keys(chains)
   ) {
 
     try {
 
-      const p =
-        provider(chainKey);
-
       const latest =
-        await p.getBlockNumber();
+        await withProvider(
+          chainKey,
+          p =>
+            p.getBlockNumber()
+        );
 
       for (
         const user
-          of users.rows
+        of users.rows
       ) {
 
-        await scanNative(
-          chainKey,
-          user,
-          latest
-        );
+        try {
 
-        const chainTokens =
-          tokens[chainKey] || {};
-
-        for (
-          const [
-            symbol,
-            info
-          ]
-            of Object.entries(
-              chainTokens
-            )
-        ) {
-
-          await scanToken(
+          await scanNative(
             chainKey,
-            symbol,
-            info,
-            user.address,
+            user,
             latest
+          );
+
+          for (
+            const [
+              symbol,
+              info
+            ]
+            of Object.entries(
+              tokens[chainKey]
+            )
+          ) {
+
+            await scanToken(
+              chainKey,
+              symbol,
+              info,
+              user.address,
+              latest
+            );
+
+          }
+
+        } catch (e) {
+
+          console.error(
+            `[SCAN USER ERROR] ${chainKey} ${user.telegram_id}: ${e.message}`
           );
 
         }
@@ -897,9 +964,7 @@ async function scanAll() {
     } catch (e) {
 
       console.error(
-        "scan chain error:",
-        chainKey,
-        e.message
+        `[SCAN CHAIN ERROR] ${chainKey}: ${e.message}`
       );
 
     }
@@ -908,33 +973,24 @@ async function scanAll() {
 
 }
 
-
-/* =========================================================
-   CONFIRMATIONS
-========================================================= */
-
 async function updateConfirmations() {
-
-  const required =
-    Number(
-      process.env.CONFIRMATIONS || 3
-    );
 
   for (
     const chainKey
-      of Object.keys(chains)
+    of Object.keys(chains)
   ) {
 
     try {
 
       const latest =
-        await provider(
-          chainKey
-        ).getBlockNumber();
+        await withProvider(
+          chainKey,
+          p =>
+            p.getBlockNumber()
+        );
 
       const rows =
         await pool.query(
-
           `
           SELECT
             id,
@@ -942,36 +998,30 @@ async function updateConfirmations() {
 
           FROM deposits
 
-          WHERE chain=$1
-
-          AND status='pending'
-
-          ORDER BY id ASC
-
-          LIMIT 1000
+          WHERE
+            chain=$1
+            AND
+            status='pending'
           `,
-
           [chainKey]
-
         );
 
       for (
         const row
-          of rows.rows
+        of rows.rows
       ) {
 
         const confirmations =
           Math.max(
             0,
             latest -
-              Number(
-                row.block_number
-              ) +
-              1
+            Number(
+              row.block_number
+            ) +
+            1
           );
 
         await pool.query(
-
           `
           UPDATE deposits
 
@@ -981,15 +1031,14 @@ async function updateConfirmations() {
 
           WHERE id=$1
           `,
-
           [
             row.id,
             confirmations,
-            confirmations >= required
+            confirmations >=
+            CONFIRMATIONS
               ? "confirmed"
               : "pending"
           ]
-
         );
 
       }
@@ -997,9 +1046,7 @@ async function updateConfirmations() {
     } catch (e) {
 
       console.error(
-        "confirmation error:",
-        chainKey,
-        e.message
+        `[CONFIRM ERROR] ${chainKey}: ${e.message}`
       );
 
     }
@@ -1008,165 +1055,263 @@ async function updateConfirmations() {
 
 }
 
-
-/* =========================================================
-   USDT SWEEP
-========================================================= */
-
-async function sweepUSDT(
+async function getTokenBalance(
   chainKey,
-  user
+  info,
+  address
 ) {
 
-  const info =
-    tokens[chainKey]?.USDT;
+  return withProvider(
+    chainKey,
+    async p => {
 
-  if (!info) {
-    throw new Error(
-      "USDT unavailable"
-    );
-  }
+      const code =
+        await p.getCode(
+          info.address
+        );
+
+      if (
+        !code ||
+        code === "0x"
+      ) {
+
+        throw new Error(
+          `Token contract not found on ${chainKey}`
+        );
+
+      }
+
+      const token =
+        new Contract(
+          info.address,
+          ERC20_ABI,
+          p
+        );
+
+      return await token.balanceOf(
+        address
+      );
+
+    }
+  );
+
+}
+
+async function centralWallet(
+  chainKey
+) {
 
   const p =
-    provider(chainKey);
-
-  const depositWallet =
-    derive(
-      Number(
-        user.wallet_index
-      )
-    ).connect(p);
-
-  const central =
-    centralWallet(
+    await getProvider(
       chainKey
     );
 
-  const token =
-    new Contract(
-      info.address,
-      ERC20_ABI,
-      depositWallet
-    );
+  const wallet =
+    derive(
+      CENTRAL_WALLET_INDEX
+    ).connect(p);
 
-  const balance =
-    await token.balanceOf(
-      depositWallet.address
-    );
-
-  const minimum =
-    parseUnits(
-      String(
-        process.env.SWEEP_MIN_USDT || "1"
-      ),
-      info.decimals
-    );
+  const configured =
+    chains[
+      chainKey
+    ].centralAddress;
 
   if (
-    balance < minimum
+    configured &&
+    configured.toLowerCase() !==
+    wallet.address.toLowerCase()
   ) {
 
-    return {
-      ok: true,
-      skipped: true
-    };
+    throw new Error(
+      `CENTRAL_${chainKey.toUpperCase()}_ADDRESS does not match CENTRAL_WALLET_INDEX wallet`
+    );
 
   }
-
-  const gasReserve =
-    parseUnits(
-      chainKey === "bsc"
-        ? String(
-            process.env.GAS_RESERVE_BNB ||
-            "0.0001"
-          )
-        : String(
-            process.env.GAS_RESERVE_ETH ||
-            "0.001"
-          ),
-      18
-    );
-
-  const nativeBalance =
-    await p.getBalance(
-      depositWallet.address
-    );
-
-  if (
-    nativeBalance < gasReserve
-  ) {
-
-    const gasTx =
-      await central.sendTransaction({
-
-        to:
-          depositWallet.address,
-
-        value:
-          gasReserve -
-          nativeBalance
-
-      });
-
-    await gasTx.wait();
-
-  }
-
-  const sweepToken =
-    new Contract(
-      info.address,
-      ERC20_ABI,
-      depositWallet
-    );
-
-  const tx =
-    await sweepToken.transfer(
-      central.address,
-      balance
-    );
-
-  const receipt =
-    await tx.wait();
 
   return {
-
-    ok: true,
-
-    amount:
-      formatUnits(
-        balance,
-        info.decimals
-      ),
-
-    from:
-      depositWallet.address,
-
-    to:
-      central.address,
-
-    txHash:
-      receipt.hash,
-
-    explorer:
-      getExplorerUrl(
-        chainKey,
-        receipt.hash
-      )
-
+    p,
+    wallet
   };
 
 }
 
+async function ensureGas(
+  chainKey,
+  userWallet,
+  tokenContract
+) {
 
-/* =========================================================
-   SWEEP ALL USDT
-========================================================= */
+  const c =
+    chains[chainKey];
 
-async function sweepAllUSDT() {
+  const [
+    feeData,
+    nativeBalance
+  ] =
+    await Promise.all([
+      userWallet.provider.getFeeData(),
+      userWallet.provider.getBalance(
+        userWallet.address
+      )
+    ]);
+
+  let gasPrice =
+    feeData.gasPrice;
+
+  if (!gasPrice) {
+    gasPrice =
+      feeData.maxFeePerGas;
+  }
+
+  if (!gasPrice) {
+
+    throw new Error(
+      `Cannot determine ${c.native} gas price`
+    );
+
+  }
+
+  let gasLimit;
+
+  try {
+
+    gasLimit =
+      await tokenContract
+        .transfer
+        .estimateGas(
+          c.centralAddress,
+          1n
+        );
+
+  } catch {
+
+    gasLimit =
+      70000n;
+
+  }
+
+  const multiplier =
+    BigInt(
+      Math.max(
+        1,
+        Math.ceil(
+          SWEEP_GAS_MULTIPLIER
+        )
+      )
+    );
+
+  const required =
+    gasLimit *
+    gasPrice *
+    multiplier;
+
+  if (
+    nativeBalance >=
+    required
+  ) {
+
+    return {
+      funded: false,
+      amount: 0n
+    };
+
+  }
+
+  const missing =
+    required -
+    nativeBalance;
+
+  const {
+    wallet: central
+  } =
+    await centralWallet(
+      chainKey
+    );
+
+  const centralBalance =
+    await central.provider.getBalance(
+      central.address
+    );
+
+  if (
+    centralBalance <=
+    missing
+  ) {
+
+    throw new Error(
+      `Central ${c.native} balance is insufficient for gas funding`
+    );
+
+  }
+
+  const fundTx =
+    await central.sendTransaction({
+      to:
+        userWallet.address,
+      value:
+        missing
+    });
+
+  await fundTx.wait(1);
+
+  return {
+    funded: true,
+    amount: missing,
+    txHash: fundTx.hash
+  };
+
+}
+
+async function sweepUSDT(
+  chainKey
+) {
+
+  const info =
+    tokens[
+      chainKey
+    ]?.USDT;
+
+  if (!info) {
+
+    throw new Error(
+      "USDT is not configured for this chain"
+    );
+
+  }
+
+  const destination =
+    chains[
+      chainKey
+    ].centralAddress;
+
+  if (
+    !isAddress(destination)
+  ) {
+
+    throw new Error(
+      `Set CENTRAL_${chainKey.toUpperCase()}_ADDRESS correctly`
+    );
+
+  }
+
+  const central =
+    await centralWallet(
+      chainKey
+    );
+
+  if (
+    central.wallet.address.toLowerCase() !==
+    destination.toLowerCase()
+  ) {
+
+    throw new Error(
+      "Central address must be the derived central wallet address"
+    );
+
+  }
 
   const users =
     await pool.query(
-
       `
       SELECT
         telegram_id,
@@ -1175,59 +1320,183 @@ async function sweepAllUSDT() {
 
       FROM wallet_users
 
-      ORDER BY id ASC
-      `
+      WHERE
+        wallet_index<>$1
 
+      ORDER BY
+        wallet_index ASC
+      `,
+      [
+        CENTRAL_WALLET_INDEX
+      ]
+    );
+
+  const results = [];
+
+  let total = 0n;
+
+  const min =
+    parseUnits(
+      SWEEP_MIN_USDT,
+      info.decimals
     );
 
   for (
-    const chainKey
-      of Object.keys(chains)
+    const user
+    of users.rows
   ) {
 
-    for (
-      const user
-        of users.rows
-    ) {
+    try {
 
-      try {
-
-        const result =
-          await sweepUSDT(
-            chainKey,
-            user
-          );
-
-        if (
-          result.ok &&
-          !result.skipped
-        ) {
-
-          console.log(
-            `[SWEEP] ${chainKey} ${user.address} ${result.amount} USDT ${result.txHash}`
-          );
-
-        }
-
-      } catch (e) {
-
-        console.error(
-          `[SWEEP ERROR] ${chainKey} ${user.address}:`,
-          e.message
+      const p =
+        await getProvider(
+          chainKey
         );
 
+      const userWallet =
+        derive(
+          Number(
+            user.wallet_index
+          )
+        ).connect(p);
+
+      const token =
+        new Contract(
+          info.address,
+          ERC20_ABI,
+          userWallet
+        );
+
+      const balance =
+        await getTokenBalance(
+          chainKey,
+          info,
+          userWallet.address
+        );
+
+      if (
+        balance <= min
+      ) {
+
+        results.push({
+          telegramId:
+            user.telegram_id,
+
+          address:
+            user.address,
+
+          balance:
+            formatUnits(
+              balance,
+              info.decimals
+            ),
+
+          action:
+            "skipped"
+        });
+
+        continue;
+
       }
+
+      /*
+       * User wallet-এ BNB/ETH না থাকলে
+       * Central wallet থেকে gas পাঠাবে।
+       */
+
+      const gas =
+        await ensureGas(
+          chainKey,
+          userWallet,
+          token
+        );
+
+      const tx =
+        await token.transfer(
+          destination,
+          balance
+        );
+
+      await tx.wait(1);
+
+      total += balance;
+
+      results.push({
+
+        telegramId:
+          user.telegram_id,
+
+        address:
+          user.address,
+
+        balance:
+          formatUnits(
+            balance,
+            info.decimals
+          ),
+
+        gasFunded:
+          gas.funded,
+
+        gasTxHash:
+          gas.txHash || null,
+
+        txHash:
+          tx.hash,
+
+        action:
+          "swept"
+
+      });
+
+    } catch (e) {
+
+      console.error(
+        `[SWEEP ERROR] ${chainKey} ${user.address}: ${e.message}`
+      );
+
+      results.push({
+
+        telegramId:
+          user.telegram_id,
+
+        address:
+          user.address,
+
+        action:
+          "failed",
+
+        error:
+          e.message
+
+      });
 
     }
 
   }
 
+  return {
+
+    chain:
+      chainKey,
+
+    symbol:
+      "USDT",
+
+    destination:
+      destination,
+
+    totalSwept:
+      formatUnits(
+        total,
+        info.decimals
+      ),
+
+    results
+
+  };
+
 }
-
-
-/* =========================================================
-   ROUTES
-========================================================= */
 
 app.get(
   "/",
@@ -1238,34 +1507,12 @@ app.get(
       ok: true,
 
       service:
-        "iCoinGate EVM Wallet API",
-
-      networks: [
-        "BNB BEP20",
-        "Ethereum ERC20"
-      ],
-
-      endpoints: {
-
-        wallet:
-          "POST /wallet",
-
-        deposits:
-          "GET /deposits",
-
-        sweep:
-          "POST /sweep-usdt",
-
-        health:
-          "GET /health"
-
-      }
+        "iCoinGate EVM Wallet API"
 
     });
 
   }
 );
-
 
 app.get(
   "/health",
@@ -1277,21 +1524,48 @@ app.get(
         "SELECT 1"
       );
 
+      const rpc = {};
+
+      for (
+        const key
+        of Object.keys(chains)
+      ) {
+
+        try {
+
+          rpc[key] =
+            await withProvider(
+              key,
+              p =>
+                p.getBlockNumber()
+            );
+
+        } catch (e) {
+
+          rpc[key] =
+            `ERROR: ${e.message}`;
+
+        }
+
+      }
+
       res.json({
-        ok: true
+        ok: true,
+        rpc
       });
 
     } catch (e) {
 
       res.status(503).json({
-        ok: false
+        ok: false,
+        error:
+          "Database unavailable"
       });
 
     }
 
   }
 );
-
 
 app.post(
   "/wallet",
@@ -1331,6 +1605,9 @@ app.post(
         existing:
           row.existing,
 
+        network:
+          "EVM",
+
         address:
           row.address,
 
@@ -1348,20 +1625,21 @@ app.post(
 
     } catch (e) {
 
+      console.error(
+        "wallet error",
+        e
+      );
+
       res.status(500).json({
-
         ok: false,
-
         error:
           "Wallet generation failed"
-
       });
 
     }
 
   }
 );
-
 
 app.get(
   "/wallet/:telegramId",
@@ -1370,14 +1648,8 @@ app.get(
 
     try {
 
-      const telegramId =
-        String(
-          req.params.telegramId
-        );
-
       const q =
         await pool.query(
-
           `
           SELECT
             telegram_id,
@@ -1389,12 +1661,16 @@ app.get(
 
           WHERE telegram_id=$1
           `,
-
-          [telegramId]
-
+          [
+            String(
+              req.params.telegramId
+            )
+          ]
         );
 
-      if (!q.rows[0]) {
+      if (
+        !q.rows[0]
+      ) {
 
         return res.status(404).json({
           ok: false,
@@ -1410,6 +1686,9 @@ app.get(
       res.json({
 
         ok: true,
+
+        network:
+          "EVM",
 
         telegramId:
           row.telegram_id,
@@ -1440,7 +1719,6 @@ app.get(
   }
 );
 
-
 app.get(
   "/deposits",
   auth,
@@ -1452,22 +1730,7 @@ app.get(
         String(
           req.query.status ||
           "confirmed"
-        ).toLowerCase();
-
-      if (
-        ![
-          "pending",
-          "confirmed"
-        ].includes(status)
-      ) {
-
-        return res.status(400).json({
-          ok: false,
-          error:
-            "Invalid status"
-        });
-
-      }
+        );
 
       const limit =
         Math.min(
@@ -1475,108 +1738,241 @@ app.get(
           Math.max(
             1,
             Number(
-              req.query.limit || 50
+              req.query.limit ||
+              50
             )
           )
         );
 
-      const telegramId =
-        req.query.telegramId
-          ? String(
-              req.query.telegramId
-            )
-          : null;
+      const q =
+        await pool.query(
+          `
+          SELECT
+            id,
+            telegram_id,
+            chain,
+            symbol,
+            amount,
+            tx_hash,
+            block_number,
+            confirmations,
+            status,
+            created_at
 
-      let q;
+          FROM deposits
 
-      if (telegramId) {
+          WHERE status=$1
 
-        q =
-          await pool.query(
+          ORDER BY id DESC
 
-            `
-            SELECT *
-            FROM deposits
-
-            WHERE status=$1
-            AND telegram_id=$2
-
-            ORDER BY id DESC
-
-            LIMIT $3
-            `,
-
-            [
-              status,
-              telegramId,
-              limit
-            ]
-
-          );
-
-      } else {
-
-        q =
-          await pool.query(
-
-            `
-            SELECT *
-            FROM deposits
-
-            WHERE status=$1
-
-            ORDER BY id DESC
-
-            LIMIT $2
-            `,
-
-            [
-              status,
-              limit
-            ]
-
-          );
-
-      }
-
-      const deposits =
-        q.rows.map(
-          row => ({
-
-            ...row,
-
-            explorer:
-              row.tx_hash.startsWith(
-                "native:"
-              )
-                ? null
-                : getExplorerUrl(
-                    row.chain,
-                    row.tx_hash
-                  )
-
-          })
+          LIMIT $2
+          `,
+          [
+            status,
+            limit
+          ]
         );
 
       res.json({
-
         ok: true,
-
-        count:
-          deposits.length,
-
-        deposits
-
+        deposits:
+          q.rows
       });
 
     } catch (e) {
 
       res.status(500).json({
+        ok: false,
+        error:
+          e.message
+      });
+
+    }
+
+  }
+);
+
+app.post(
+  "/withdraw",
+  auth,
+  async (req, res) => {
+
+    try {
+
+      const telegramId =
+        String(
+          req.body.telegramId || ""
+        );
+
+      const chainKey =
+        String(
+          req.body.chain || ""
+        ).toLowerCase();
+
+      const symbol =
+        String(
+          req.body.symbol || ""
+        ).toUpperCase();
+
+      const destination =
+        String(
+          req.body.to || ""
+        );
+
+      const amountText =
+        String(
+          req.body.amount || ""
+        );
+
+      if (
+        !validTelegramId(
+          telegramId
+        )
+      ) {
+
+        throw new Error(
+          "Invalid Telegram ID"
+        );
+
+      }
+
+      if (
+        !chains[chainKey]
+      ) {
+
+        throw new Error(
+          "Unsupported network"
+        );
+
+      }
+
+      if (
+        !isAddress(
+          destination
+        )
+      ) {
+
+        throw new Error(
+          "Invalid EVM destination"
+        );
+
+      }
+
+      if (
+        !amountText ||
+        Number(amountText) <= 0
+      ) {
+
+        throw new Error(
+          "Invalid amount"
+        );
+
+      }
+
+      const user =
+        await getOrCreateWallet(
+          telegramId
+        );
+
+      const p =
+        await getProvider(
+          chainKey
+        );
+
+      const wallet =
+        derive(
+          Number(
+            user.wallet_index
+          )
+        ).connect(p);
+
+      let tx;
+
+      if (
+        symbol ===
+        chains[chainKey].native
+      ) {
+
+        tx =
+          await wallet.sendTransaction({
+            to:
+              destination,
+
+            value:
+              parseUnits(
+                amountText,
+                18
+              )
+          });
+
+      } else {
+
+        const info =
+          tokens[
+            chainKey
+          ]?.[symbol];
+
+        if (!info) {
+
+          throw new Error(
+            "Unsupported token"
+          );
+
+        }
+
+        const token =
+          new Contract(
+            info.address,
+            ERC20_ABI,
+            wallet
+          );
+
+        tx =
+          await token.transfer(
+            destination,
+            parseUnits(
+              amountText,
+              info.decimals
+            )
+          );
+
+      }
+
+      res.json({
+
+        ok: true,
+
+        network:
+          chainKey,
+
+        symbol:
+          symbol,
+
+        txHash:
+          tx.hash,
+
+        explorer:
+          chains[
+            chainKey
+          ].explorer +
+          tx.hash
+
+      });
+
+    } catch (e) {
+
+      console.error(
+        "withdraw error",
+        e
+      );
+
+      res.status(400).json({
 
         ok: false,
 
         error:
-          "Failed to fetch deposits"
+          e.message ||
+          "Withdraw failed"
 
       });
 
@@ -1585,152 +1981,8 @@ app.get(
   }
 );
 
-
 /* =========================================================
-   AUTO USDT SWEEP + BNB GAS FUNDING
-========================================================= */
-
-async function sweepAllUSDT() {
-
-  const chainKey = "bsc";
-  const symbol = "USDT";
-
-  const info = tokens[chainKey]?.[symbol];
-
-  if (!info) {
-    throw new Error("BSC USDT token config missing");
-  }
-
-  const p = provider(chainKey);
-
-  // CENTRAL WALLET
-  const central = new Wallet(
-    process.env.CENTRAL_PRIVATE_KEY,
-    p
-  );
-
-  const token = new Contract(
-    info.address,
-    ERC20_ABI,
-    p
-  );
-
-  const users = await pool.query(`
-    SELECT telegram_id, wallet_index, address
-    FROM wallet_users
-    ORDER BY wallet_index ASC
-  `);
-
-  const results = [];
-
-  for (const user of users.rows) {
-
-    try {
-
-      const wallet = derive(
-        Number(user.wallet_index)
-      ).connect(p);
-
-      const walletAddress = await wallet.getAddress();
-
-      // USDT BALANCE
-      const usdtBalance =
-        await token.balanceOf(walletAddress);
-
-      if (usdtBalance === 0n) {
-        results.push({
-          telegramId: user.telegram_id,
-          address: walletAddress,
-          usdt: "0",
-          action: "no_usdt"
-        });
-        continue;
-      }
-
-      /*
-       * CHECK BNB GAS
-       */
-      const bnbBalance =
-        await p.getBalance(walletAddress);
-
-      const feeData =
-        await p.getFeeData();
-
-      const gasPrice =
-        feeData.gasPrice ||
-        ethers.parseUnits("3", "gwei");
-
-      const gasLimit = 65000n;
-
-      const requiredGas =
-        gasPrice * gasLimit;
-
-      /*
-       * FUND BNB FROM CENTRAL WALLET
-       */
-      if (bnbBalance < requiredGas) {
-
-        const extraGas =
-          requiredGas - bnbBalance +
-          ethers.parseEther("0.00002");
-
-        const gasTx =
-          await central.sendTransaction({
-            to: walletAddress,
-            value: extraGas,
-            gasLimit: 21000n,
-            gasPrice
-          });
-
-        await gasTx.wait(1);
-      }
-
-      /*
-       * SEND ALL USDT TO CENTRAL WALLET
-       */
-      const tx =
-        await token
-          .connect(wallet)
-          .transfer(
-            central.address,
-            usdtBalance,
-            {
-              gasLimit
-            }
-          );
-
-      await tx.wait(1);
-
-      results.push({
-        telegramId: user.telegram_id,
-        address: walletAddress,
-        usdt: formatUnits(
-          usdtBalance,
-          info.decimals
-        ),
-        txHash: tx.hash,
-        action: "swept"
-      });
-
-    } catch (e) {
-
-      results.push({
-        telegramId: user.telegram_id,
-        address: user.address,
-        action: "failed",
-        error: e.message
-      });
-
-    }
-
-  }
-
-  return results;
-}
-
-
-/* =========================================================
-   /sweep-usdt
+   USDT SWEEP
 ========================================================= */
 
 app.post(
@@ -1740,61 +1992,85 @@ app.post(
 
     try {
 
-      const secret =
-        String(req.body.secret || "");
+      const chainKey =
+        String(
+          req.body.chain ||
+          "bsc"
+        ).toLowerCase();
 
       if (
-        !process.env.SWEEP_SECRET ||
-        secret !== process.env.SWEEP_SECRET
+        !tokens[
+          chainKey
+        ]?.USDT
       ) {
-        return res.status(401).json({
+
+        return res.status(400).json({
+
           ok: false,
-          error: "Unauthorized"
+
+          error:
+            "USDT is not configured for this chain"
+
         });
+
       }
 
-      const results =
-        await sweepAllUSDT();
+      const result =
+        await sweepUSDT(
+          chainKey
+        );
 
       const swept =
-        results.filter(
-          x => x.action === "swept"
-        );
+        result.results.filter(
+          x =>
+            x.action ===
+            "swept"
+        ).length;
 
       const failed =
-        results.filter(
-          x => x.action === "failed"
-        );
+        result.results.filter(
+          x =>
+            x.action ===
+            "failed"
+        ).length;
 
       res.json({
+
         ok: true,
-        message: "USDT sweep completed",
-        swept: swept.length,
-        failed: failed.length,
-        results
+
+        ...result,
+
+        swept:
+
+          swept,
+
+        failed:
+
+          failed
+
       });
 
     } catch (e) {
 
       console.error(
-        "USDT sweep error:",
+        "sweep-usdt error",
         e
       );
 
       res.status(500).json({
+
         ok: false,
-        error: e.message
+
+        error:
+          e.message ||
+          "Sweep operation failed"
+
       });
 
     }
 
   }
 );
-
-
-/* =========================================================
-   START
-========================================================= */
 
 await initDb();
 
@@ -1804,24 +2080,32 @@ app.listen(
   () => {
 
     console.log(
-      `🚀 iCoinGate EVM Wallet API running on ${PORT}`
+      `iCoinGate EVM Wallet API running on ${PORT}`
+    );
+
+    console.log(
+      `Central wallet index: ${CENTRAL_WALLET_INDEX}`
     );
 
   }
 );
 
-/* =========================================================
-   AUTOMATIC SCANNER + SWEEPER
-========================================================= */
-
-const interval =
-  Number(
-    process.env.SCAN_INTERVAL_MS ||
-    30000
-  );
+let scannerRunning =
+  false;
 
 setInterval(
   async () => {
+
+    if (
+      scannerRunning
+    ) {
+
+      return;
+
+    }
+
+    scannerRunning =
+      true;
 
     try {
 
@@ -1829,17 +2113,20 @@ setInterval(
 
       await updateConfirmations();
 
-      await sweepAllUSDT();
-
     } catch (e) {
 
       console.error(
-        "Worker error:",
-        e.message
+        "scanner error",
+        e
       );
+
+    } finally {
+
+      scannerRunning =
+        false;
 
     }
 
   },
-  interval
+  SCAN_INTERVAL_MS
 );
