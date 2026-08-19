@@ -2561,6 +2561,127 @@ app.get("/admin/recovery/wallets", async (req, res) => {
 });
 
 /* =========================================================
+   RESTORE / VERIFY RECOVERED WALLETS
+========================================================= */
+
+app.get("/admin/recovery/verify", async (req, res) => {
+
+  try {
+
+    const secret = String(
+      req.query.secret || ""
+    );
+
+    if (
+      !process.env.ADMIN_SECRET ||
+      secret !== process.env.ADMIN_SECRET
+    ) {
+      return res.status(401).json({
+        ok: false,
+        error: "Unauthorized"
+      });
+    }
+
+    const recovered = [
+      {
+        telegramId: "8994226373",
+        walletIndex: 0,
+        address: "0x3E53A1bAA5A7ab55814A7d2B8610971823061Ec4"
+      },
+      {
+        telegramId: "7345965829",
+        walletIndex: 1,
+        address: "0xf7dF96C3bEb3730aB272534a568D71e9d9F27E7f"
+      },
+      {
+        telegramId: "5591327683",
+        walletIndex: 2,
+        address: "0x2c80553A189d8e7657a301455C3e21c10A3F7869"
+      }
+    ];
+
+    const result = [];
+
+    for (const w of recovered) {
+
+      const q = await pool.query(
+        `
+        SELECT
+          telegram_id,
+          wallet_index,
+          address,
+          created_at
+        FROM wallet_users
+        WHERE telegram_id=$1
+        `,
+        [w.telegramId]
+      );
+
+      if (q.rows[0]) {
+
+        result.push({
+          telegramId: w.telegramId,
+          walletIndex: Number(q.rows[0].wallet_index),
+          address: q.rows[0].address,
+          status: "already_exists"
+        });
+
+        continue;
+      }
+
+      /*
+       * Wallet নেই হলে recovered record insert করবে
+       */
+
+      await pool.query(
+        `
+        INSERT INTO wallet_users(
+          telegram_id,
+          wallet_index,
+          address
+        )
+        VALUES($1,$2,$3)
+        ON CONFLICT DO NOTHING
+        `,
+        [
+          w.telegramId,
+          w.walletIndex,
+          w.address
+        ]
+      );
+
+      result.push({
+        telegramId: w.telegramId,
+        walletIndex: w.walletIndex,
+        address: w.address,
+        status: "restored"
+      });
+
+    }
+
+    res.json({
+      ok: true,
+      count: result.length,
+      wallets: result
+    });
+
+  } catch (e) {
+
+    console.error(
+      "wallet restore error:",
+      e.message
+    );
+
+    res.status(500).json({
+      ok: false,
+      error: "Wallet restore failed"
+    });
+
+  }
+
+});
+
+/* =========================================================
    INITIAL SCAN
 ========================================================= */
 
